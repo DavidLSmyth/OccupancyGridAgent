@@ -1,0 +1,7 @@
+requests
+numpy
+msgpack-rpc-python
+autologging
+scipy
+matplotlib
+sklearn
