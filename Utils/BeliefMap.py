@@ -24,9 +24,9 @@ from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
 def calc_posterior(observation, prior):
     numerator = (prior * observation)
     denominator = ((prior * observation) + (1-prior)*(1-observation))
-    if denominator == 0:
+    #if denominator == 0:
         #this is a quick and easy solution, should use log odds to solve this properly
-        denominator = 0.000000001
+    #    denominator = 0.0000000000000001
     return numerator / denominator
 #This calculates the posterior distribution of detection of a source in the grid to be explored, 
 #where there is no independence between grid cells
