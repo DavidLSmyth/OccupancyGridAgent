@@ -28,6 +28,7 @@ def calc_posterior(observation, prior):
         #this is a quick and easy solution, should use log odds to solve this properly
     #    denominator = 0.0000000000000001
     return numerator / denominator
+
 #This calculates the posterior distribution of detection of a source in the grid to be explored, 
 #where there is no independence between grid cells
 #need to know sensor sensitivity, prior and probability of false positive/false negative
@@ -52,14 +53,40 @@ def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: floa
             numerator = (1-alpha) * prior
     return numerator/denominator
 
+def _calc_posterior_from_sensor(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha, beta):
+    numerator = grid_cell_to_update_prior
+    
+    if observation_value == 0 and observation_cell_loc == update_cell_loc:
+        assert grid_cell_to_update_prior == observation_grid_loc_prior
+        numerator = beta * numerator
+        denominator = ((1 - alpha) * (1-grid_cell_to_update_prior)) + (beta * grid_cell_to_update_prior)
+        
+    elif observation_value == 1 and observation_cell_loc == update_cell_loc:
+        assert grid_cell_to_update_prior == observation_grid_loc_prior
+        numerator = (1 - beta) * numerator
+        denominator = ((alpha) * (1-grid_cell_to_update_prior)) + ((1 - beta) * grid_cell_to_update_prior)
+    
+    elif observation_value == 0 and observation_cell_loc != update_cell_loc:
+        numerator = (1 - alpha) * numerator
+        denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((beta) * observation_grid_loc_prior)
+        
+    elif observation_value == 1 and observation_cell_loc != update_cell_loc:
+        numerator = (alpha) * numerator
+        denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
+        
+    else:
+        raise Exception("Cannot calculate posterior given provided info.")
+        
+    return numerator / denominator
+
 #wrapper method for above given an agent observation rather than a probability and recorded grid location
-def calc_posterior_given_sensor_sensitivity(agent_observation: 'BinaryAgentObservation', location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior):
+def calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value: int, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha: float, beta: float):
     '''
     As outlined in A Decision-Making Framework for Control Strategies in Probabilistic Search, all grid cell probabilities are updated 
     whenever an observation is made in any grid cell. This function returns the posterior probability of the source being present in a 
     single grid cell having made an observation (possibly in another grid cell)
     '''
-    return _calc_posterior_given_sensor_sensitivity(agent_observation, location, alpha, beta, prior)
+    return _calc_posterior_from_sensor(observation_grid_loc_prior, grid_cell_to_update_prior, observation_value, observation_cell_loc, update_cell_loc, alpha, beta)
 
 #%%
 #A belief map component consists of a grid location and a likelihood
@@ -242,14 +269,25 @@ class ChungBurdickBeliefMap(BeliefMap):
             
         
     def update_from_prob(self, observation_grid_loc, obs_prob):
-        '''Updates likelihood at all grid locations given a grid location and observation. Mult-processing this would offer a nice speedup.'''
-        for grid_loc in self.grid.get_grid_points():
-            prior_val = self._get_current_likelihood_at_loc(grid_loc)
+        '''
+        Updates likelihood at all grid locations given a grid location and observation. Mult-processing this would offer a nice speedup.
+        '''
+        
+        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+        for grid_loc_to_update in self.grid.get_grid_points():
+            #prior_val_update_cell = self._get_current_likelihood_at_loc(grid_loc)
             #_calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior)
-            new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val)
-            self.belief_map_components[self._get_observation_grid_index(grid_loc)] = BeliefMapComponent(grid_loc, new_belief_value)        
+            #new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val_update_cell, prior_val_measurement_cell)
+            
+            grid_cell_to_update_prior = self.get_belief_map_component(grid_loc_to_update).likelihood
+            
+            new_belief_value = calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, grid_cell_to_update_prior, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
+            
+            self.belief_map_components[self._get_observation_grid_index(grid_loc_to_update)] = BeliefMapComponent(grid_loc_to_update, new_belief_value)        
+
         if self.apply_blur:
             self.apply_gaussian_blur()
+            
             
     def get_probability_source_in_grid(self):
         return sum([belief_map_component.likelihood for belief_map_component in self.belief_map_components])
@@ -374,7 +412,7 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
 
 #%%
 if __name__ == "__main__":
-    
+
 #    #A belief map component consists of a grid location and a likelihood
 #    _BeliefMapComponent = typing.NamedTuple('belief_map_component', 
 #                                [('grid_loc',Vector3r),
