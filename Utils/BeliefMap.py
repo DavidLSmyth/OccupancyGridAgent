@@ -55,24 +55,24 @@ def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: floa
 
 def _calc_posterior_from_sensor(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha, beta):
     numerator = grid_cell_to_update_prior
-    
-    if observation_value == 0 and observation_cell_loc == update_cell_loc:
-        assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = beta * numerator
-        denominator = ((1 - alpha) * (1-grid_cell_to_update_prior)) + (beta * grid_cell_to_update_prior)
-        
-    elif observation_value == 1 and observation_cell_loc == update_cell_loc:
-        assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = (1 - beta) * numerator
-        denominator = ((alpha) * (1-grid_cell_to_update_prior)) + ((1 - beta) * grid_cell_to_update_prior)
-    
-    elif observation_value == 0 and observation_cell_loc != update_cell_loc:
+    #ordered by most likely to least likely
+    if observation_value == 0 and observation_cell_loc != update_cell_loc:
         numerator = (1 - alpha) * numerator
         denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((beta) * observation_grid_loc_prior)
         
     elif observation_value == 1 and observation_cell_loc != update_cell_loc:
-        numerator = (alpha) * numerator
-        denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
+            numerator = (alpha) * numerator
+            denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
+            
+    elif observation_value == 1 and observation_cell_loc == update_cell_loc:
+        assert grid_cell_to_update_prior == observation_grid_loc_prior
+        numerator = (1 - beta) * numerator
+        denominator = ((alpha) * (1-grid_cell_to_update_prior)) + ((1 - beta) * grid_cell_to_update_prior)
+        
+    elif observation_value == 0 and observation_cell_loc == update_cell_loc:
+        assert grid_cell_to_update_prior == observation_grid_loc_prior
+        numerator = beta * numerator
+        denominator = ((1 - alpha) * (1-grid_cell_to_update_prior)) + (beta * grid_cell_to_update_prior)
         
     else:
         raise Exception("Cannot calculate posterior given provided info.")
@@ -266,7 +266,18 @@ class ChungBurdickBeliefMap(BeliefMap):
 #        
 #        if self.apply_blur:
 #            self.apply_gaussian_blur()
-            
+        
+        
+    def update_from_prob_optimized(self, observation_grid_loc, obs_prob):
+        '''Updated probability, optimized using local variables and map'''
+        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+
+        def calc_posterior_given_sensor_sensitivity_inner(grid_loc_to_update):
+            return calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, self.get_belief_map_component(grid_loc_to_update).likelihood, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
+        
+        new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
+        self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs)]
+        
         
     def update_from_prob(self, observation_grid_loc, obs_prob):
         '''
@@ -274,6 +285,7 @@ class ChungBurdickBeliefMap(BeliefMap):
         '''
         
         observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+        #this is really slow...
         for grid_loc_to_update in self.grid.get_grid_points():
             #prior_val_update_cell = self._get_current_likelihood_at_loc(grid_loc)
             #_calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior)
@@ -546,10 +558,64 @@ if __name__ == "__main__":
     uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
 #%%
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 20, 15)
-    alpha = 0.2
-    beta = 0.1
+    false_positive_rate = 0.2
+    false_negative_rate = 0.1
     cb_bel_map = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, alpha, beta)
+                                                             {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
     
-# Vector3r(0, 15, 0.0) in [Vector3r(0,135,0.0), Vector3r(0,120,0.0), Vector3r(0,105,0.0), Vector3r(0,90,0.0), Vector3r(0,75,0.0), Vector3r(0,60,0.0), Vector3r(0,45,0.0), Vector3r(0,30,0.0), Vector3r(0,15,0.0), Vector3r(0,0,0.0), Vector3r(20,0,0.0), Vector3r(20,15,0.0), Vector3r(20,30,0.0), Vector3r(20,45,0.0), Vector3r(20,60,0.0), Vector3r(20,75,0.0), Vector3r(20,90,0.0), Vector3r(20,105,0.0), Vector3r(20,120,0.0), Vector3r(20,135,0.0), Vector3r(40,135,0.0), Vector3r(40,120,0.0), Vector3r(40,105,0.0), Vector3r(40,90,0.0), Vector3r(40,75,0.0), Vector3r(40,60,0.0), Vector3r(40,45,0.0), Vector3r(40,30,0.0), Vector3r(40,15,0.0), Vector3r(40,0,0.0), Vector3r(60,0,0.0), Vector3r(60,15,0.0), Vector3r(60,30,0.0), Vector3r(60,45,0.0), Vector3r(60,60,0.0), Vector3r(60,75,0.0), Vector3r(60,90,0.0), Vector3r(60,105,0.0), Vector3r(60,120,0.0), Vector3r(60,135,0.0), Vector3r(80,135,0.0), Vector3r(80,120,0.0), Vector3r(80,105,0.0), Vector3r(80,90,0.0), Vector3r(80,75,0.0), Vector3r(80,60,0.0), Vector3r(80,45,0.0), Vector3r(80,30,0.0), Vector3r(80,15,0.0), Vector3r(80,0,0.0), Vector3r(100,0,0.0), Vector3r(100,15,0.0), Vector3r(100,30,0.0), Vector3r(100,45,0.0), Vector3r(100,60,0.0), Vector3r(100,75,0.0), Vector3r(100,90,0.0), Vector3r(100,105,0.0), Vector3r(100,120,0.0), Vector3r(100,135,0.0)]
+    #write some assertions here!
+    
+#%%
+    import math
+    import random
+    import time
+    import matplotlib.pyplot as plt
+    timings = []
+    #check how long updated a belief map takes as a function of grid size
+    #grid sizes are from 100 to 2704
+    no_grids = 12
+    no_updates = 10
+    test_grids = [UE4Grid(1, 1, Vector3r(0,0), 12 + i*3, 12 + i*3) for i in range(no_grids)]
+    false_positive_rate = 0.2
+    false_negative_rate = 0.1
+    for test_grid in test_grids:
+        t1 = time.time
+        bel_map = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+        t1 = time.time()
+        
+        for i in range(no_updates):
+            bel_map.update_from_prob_optimized(Vector3r(2+i, 3+i), round(random.random()))
+        t2 = time.time()
+        timings.append((t2 - t1)/no_updates)
+    
+    plt.figure()
+    plt.plot([(12 + i*3)**2 for i in range(no_grids)],timings)
+    plt.xlabel("Size of belief map grid")
+    plt.ylabel("Time taken per update")
 
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        

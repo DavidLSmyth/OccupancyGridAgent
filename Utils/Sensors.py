@@ -121,24 +121,22 @@ class AirsimImageSensor:
 
 class ChungBurdickSingleSourceSensor:
     '''A sensor which returns the probability of detection at a location, given the knowledge that there is a single source present'''
-    def __init__(self, alpha, beta, source_location):
-        self.alpha = alpha
-        self.beta = beta
+    def __init__(self, false_positive_rate, false_negative_rate, source_location):
+        self.false_positive_rate = false_positive_rate
+        self.false_negative_rate = false_negative_rate
         self.source_location = source_location
         
     def get_detection_val(self,location):
         rand_no = random.random()
-        #print("location: ", location)
-        #print("source_location: ", self.source_location)
         if location == self.source_location:
             #0 reading (false negative) generated with probability beta at grid location where source actually lies
-            if rand_no < self.beta:
+            if rand_no < self.false_negative_rate:
                 return 0
             else:
                 return 1
         else:
             #1 reading (false positive) generated with probability alpha at grid location where source is not actually present
-            if rand_no < self.alpha:
+            if rand_no < self.false_positive_rate:
                 return 1
             else:
                 return 0
@@ -170,10 +168,26 @@ class ChungBurdickSingleSourceSensor:
 #        
 #sensor_reading = lambda image_loc: get_highest_pred(get_image_response(image_loc))
 #
+#%%
+if __name__ == '__main__':
+    
+    #%%
+    import math
+    
+    #"false alarm rate"
+    fpr = 0.2
+    #"missed detection rate"
+    fnr = 0.25
+    
+    source_location = Vector3r(2,2)
+    cb_sensor = ChungBurdickSingleSourceSensor(fpr, fnr, source_location)
 
-
-
-
+    no_samples = 100000
+    
+    #check fpr
+    assert math.isclose(sum([cb_sensor.get_probability(Vector3r(0,0)) for i in range(no_samples)]), no_samples*fpr, rel_tol = 0.01)
+    #check fnr
+    assert math.isclose(sum([1-cb_sensor.get_probability(source_location) for i in range(no_samples)]), no_samples*(fnr), rel_tol = 0.01)
 
 
 
