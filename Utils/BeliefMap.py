@@ -75,7 +75,7 @@ def _calc_posterior_from_sensor(observation_grid_loc_prior: float, grid_cell_to_
         denominator = ((1 - alpha) * (1-grid_cell_to_update_prior)) + (beta * grid_cell_to_update_prior)
         
     else:
-        raise Exception("Cannot calculate posterior given provided info.")
+        raise Exception("Cannot calculate posterior when sensor readings are not 0 or 1. You provided value {}".format(observation_value))
         
     return numerator / denominator
 
@@ -148,6 +148,9 @@ def get_upper_confidence_given_obs(observations: list):
     else:
         return (sum(observations)/len(observations)) + t * (np.std(observations)/(len(observations)**0.5))
 
+def get_lower_and_upper_confidence_given_obs(observations: typing.List[AgentObservation]):
+    return get_lower_confidence_given_obs(observations), get_upper_confidence_given_obs(observations)
+
 #%%
 #######################  Belief map and tests  #######################
 class ContinuousBeliefMap:
@@ -167,6 +170,8 @@ class BeliefMap:
         self.belief_map_components = belief_map_components
         self.prior = prior
         self.apply_blur = apply_blur
+        
+        #create a cache of probability updates based on grid size - e.g. for n observations, 
     
     def get_prior(self)->typing.Dict[Vector3r, float]:
         return self.prior
@@ -221,10 +226,15 @@ class BeliefMap:
         ax.plot_trisurf(X, Y, Z)
         plt.savefig(filepath)
     
-    def get_most_likely_coordinate(self):
+    def get_most_likely_component(self):
+        '''Returns the belief map component that has the highest likelihood of containing the source'''
         return max([component for component in self.belief_map_components], key = lambda component: component.likelihood)
     
-    #experimental
+    def get_ith_most_likely_component(self, i):
+        '''Returns the belief map component that has the highest likelihood of containing the source'''
+        return sorted([component for component in self.belief_map_components], key = lambda component: component.likelihood)[i-1] # i-1 necessary for zero-indexed lists
+    
+    #experimental - shouldn't need to use this in Chung & Burdick framework since bayesian filtering consists of a prediction and smoothing step already.
     def apply_gaussian_blur(self, blur_radius = None):
         '''Idea is that grid locations are not independent, and the joint distribution should be continuous. Apply a smoother in order to 
         prevent large discontinuities. This is addressed properly in the paper "Learning Occupancy Grids with Forward Models. (http://robots.stanford.edu/papers/thrun.iros01-occmap.pdf)'''
@@ -242,6 +252,42 @@ class BeliefMap:
     def __str__(self):
         return str({"grid": self.grid,"prior": self.prior,"components": self.belief_map_components})
                     #"agent_name": self.agent_name,
+                    
+    #some useful class methods for analysis
+    #maybe these should eventually go in a different place but for now will keep them here
+    #add non-class methods to allow the calculation of relative/absolute change in belief
+    #given most recent measurement
+    @classmethod
+    def relative_change_bel_pos_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        alpha1 = 1 - alpha - beta
+        numerator = ((alpha * prev_belief) + (alpha1 * prior_at_reading))
+        denominator = ((alpha * prev_belief) + (alpha1 * prior_at_reading * prev_belief))
+        return numerator/denominator
+    
+    @classmethod
+    def absolute_change_bel_pos_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        gamma = 1 - alpha - beta
+        numerator = (prior_at_reading) * (gamma) * (1 - (prev_belief))
+        denominator = alpha + (gamma * prior_at_reading)
+        return numerator/denominator
+    
+    @classmethod
+    def relative_change_bel_neg_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        beta1 = 1 - alpha - beta
+        numerator = (((1-alpha) * prev_belief) - (beta1 * prior_at_reading))
+        denominator = (((1-alpha) * prev_belief) - (beta1 * prior_at_reading * prev_belief))
+        return numerator/denominator
+    
+    @classmethod
+    def absolute_change_bel_neg_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        gamma = 1 - alpha - beta
+        numerator = (prior_at_reading) * (gamma) * ((prev_belief) - 1)
+        denominator = (1 - alpha) - (gamma * prior_at_reading)
+        return numerator/denominator
  
     
 class ChungBurdickBeliefMap(BeliefMap):
@@ -278,6 +324,19 @@ class ChungBurdickBeliefMap(BeliefMap):
         new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
         self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs)]
         
+    def update_from_prob_optimized_one(self, observation_grid_loc, obs_prob):
+        '''Updated probability, optimized using local variables and map'''
+        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+        grid_points_array = np.array(self.grid.get_grid_points())
+        #likelihoods = np.array([self.get_belief_map_component(grid_loc_to_update).likelihood] for grid_loc_to_update in grid_points_array)
+        def calc_posterior_given_sensor_sensitivity_inner(grid_loc_to_update):
+            return calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, self.get_belief_map_component(grid_loc_to_update).likelihood, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
+        
+        #new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
+        new_beliefs_vectorized = np.vectorize(calc_posterior_given_sensor_sensitivity_inner)
+        new_beliefs = new_beliefs_vectorized(grid_points_array)
+        #new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
+        self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs.tolist())]
         
     def update_from_prob(self, observation_grid_loc, obs_prob):
         '''
@@ -292,7 +351,8 @@ class ChungBurdickBeliefMap(BeliefMap):
             #new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val_update_cell, prior_val_measurement_cell)
             
             grid_cell_to_update_prior = self.get_belief_map_component(grid_loc_to_update).likelihood
-            
+            #this could be made to be more efficient - having some kind of cache that stores in advance the updates to the map given a sequence of observations could
+            #be beneficial but might not be possible with non-uniform prior
             new_belief_value = calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, grid_cell_to_update_prior, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
             
             self.belief_map_components[self._get_observation_grid_index(grid_loc_to_update)] = BeliefMapComponent(grid_loc_to_update, new_belief_value)        
@@ -356,7 +416,8 @@ class ConfidenceIntervalBeliefMap:
                     grid_loc_obs.append(agent_observation.probability)
             self.belief_map_components[self._get_observation_grid_index(grid_loc)] = BeliefMapComponent(grid_loc, get_lower_confidence_given_obs(grid_loc_obs))    
         
-    
+    def get_upper_lower_confidence_interval_from_observations(self, agent_observations: typing.Set[AgentObservation]):
+        return self.calculate_lower_confidence_from_observations(agent_observations), self.calculate_upper_confidence_from_observations(agent_observations)
     
 #%%
 #maybe this should go in contsructor and make regular class
@@ -557,12 +618,192 @@ if __name__ == "__main__":
     uCIBelMap.calculate_lower_confidence_from_observations([obs1, obs2, obs3])
     uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
 #%%
-    test_grid = UE4Grid(1, 1, Vector3r(0,0), 20, 15)
+    test_grid = UE4Grid(1, 1, Vector3r(0,0), 8, 6)
+    #prob of postive reading at non-source location = false alarm = alpha
     false_positive_rate = 0.2
+    #prob of negative reading at source location = missed detection = beta
     false_negative_rate = 0.1
-    cb_bel_map = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map2 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    #%%prove that total belief is same for single source no matter what order beliefs are in.
     
+    #first make sure priors are same
+    import math    
+    assert math.isclose(cb_bel_map3.get_probability_source_in_grid(),cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) and math.isclose(cb_bel_map3.get_probability_source_in_grid() ,cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) 
+
+    #%%
+    obs1 = AgentObservation(Vector3r(2,4,0),1, 1, 1234, 'agent1')
+    obs2 = AgentObservation(Vector3r(3,4),1, 2, 1235, 'agent1')
+    obs3 = AgentObservation(Vector3r(1, 5,0),0, 3, 1237, 'agent1')
+    obs4 = AgentObservation(Vector3r(2, 5,0),0, 4, 1238, 'agent1')
+    
+    cb_bel_map1.update_from_observation(obs1)
+    cb_bel_map1.update_from_observation(obs2)
+    cb_bel_map1.update_from_observation(obs3)
+    cb_bel_map1.update_from_observation(obs4)
+    
+    cb_bel_map2.update_from_observation(obs3)
+    cb_bel_map2.update_from_observation(obs2)
+    cb_bel_map2.update_from_observation(obs1)
+    cb_bel_map2.update_from_observation(obs4)
+    
+    cb_bel_map3.update_from_observation(obs4)
+    cb_bel_map3.update_from_observation(obs3)
+    cb_bel_map3.update_from_observation(obs1)
+    cb_bel_map3.update_from_observation(obs2)
+
+    #now make sure that the order in which updates are made doesn't matter
+    assert math.isclose(cb_bel_map3.get_probability_source_in_grid(),cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) and math.isclose(cb_bel_map3.get_probability_source_in_grid() ,cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) 
+    
+    #%%
+    # Check whether the optimized grid map gives same results as unoptimized grid map
+    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map2 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,0), 1)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,1), 0)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,1), 1)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,2), 0)
+    
+    cb_bel_map2.update_from_prob(Vector3r(0,0), 1)
+    cb_bel_map2.update_from_prob(Vector3r(0,1), 0)
+    cb_bel_map2.update_from_prob(Vector3r(0,1), 1)
+    cb_bel_map2.update_from_prob(Vector3r(0,2), 0)
+    
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,0), 1)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,1), 0)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,1), 1)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,2), 0)
+    
+    
+    assert math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map1.get_probability_source_in_grid(), rel_tol = 0.0001) and math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map3.get_probability_source_in_grid(), rel_tol = 0.0001)
+    for comp1, comp2, comp3 in zip(cb_bel_map1.get_belief_map_components(), cb_bel_map2.get_belief_map_components(), cb_bel_map3.get_belief_map_components()):
+        assert math.isclose(comp1.likelihood, comp2.likelihood, rel_tol = 0.0001)
+        assert math.isclose(comp2.likelihood, comp3.likelihood, rel_tol = 0.0001)
+        
+
+
+
+    
+    #%%
+    
+    #interested to know how much is lost and gained by each grid cell given a positive/negative reading
+    #In theory, the relative increase in belief when a positive observation is made is:
+    #(assume beta = alpha + alpha1)
+    #assume positive reading was made at k
+    #Bel(t) = (alpha1 * prior(k) + alpha * Bel(t-1)) /  ((alpha + alpha1 * prior(k)) * Bel(t-1))
+    
+    #%%
+    #these functions give the values for the relative change in belief
+    def relative_change_bel_pos_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        alpha1 = 1 - alpha - beta
+        numerator = ((alpha * prev_belief) + (alpha1 * prior_at_reading))
+        denominator = ((alpha * prev_belief) + (alpha1 * prior_at_reading * prev_belief))
+        return numerator/denominator
+    
+    def absolute_change_bel_pos_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        gamma = 1 - alpha - beta
+        numerator = (prior_at_reading) * (gamma) * (1 - (prev_belief))
+        denominator = alpha + (gamma * prior_at_reading)
+        return numerator/denominator
+    
+    def relative_change_bel_neg_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        beta1 = 1 - alpha - beta
+        numerator = (((1-alpha) * prev_belief) - (beta1 * prior_at_reading))
+        denominator = (((1-alpha) * prev_belief) - (beta1 * prior_at_reading * prev_belief))
+        return numerator/denominator
+    
+    def absolute_change_bel_neg_reading(alpha, beta, prev_belief, prior_at_reading):
+        '''Calculates the relatives change in belief given a positive reading'''
+        gamma = 1 - alpha - beta
+        numerator = (prior_at_reading) * (gamma) * ((prev_belief) - 1)
+        denominator = (1 - alpha) - (gamma * prior_at_reading)
+        return numerator/denominator
+    
+    #%%
+    test_grid = UE4Grid(1, 1, Vector3r(0,0), 8, 6)
+    #prob of postive reading at non-source location = false alarm = alpha
+    false_positive_rate = 0.2
+    #prob of negative reading at source location = missed detection = beta
+    false_negative_rate = 0.1
+    cb_bel_map = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    
+    import math
+    prev_belief = cb_bel_map.get_probability_source_in_grid() 
+    prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,0)).likelihood
+    cb_bel_map.update_from_prob(Vector3r(0,0), 1)
+    current_belief = cb_bel_map.get_probability_source_in_grid()
+    #numerator = ((1-false_negative_rate) * prior_val) + (false_positive_rate*(prev_bel-prior_val))
+    #denominator = ((false_positive_rate * (1-prior_val)) + ((1-false_negative_rate) * (prior_val))) * prev_bel
+    assert math.isclose(current_belief/prev_belief, relative_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    assert math.isclose(current_belief-prev_belief, absolute_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    
+    #%%
+    #check holds for another positive reading
+    prev_belief = cb_bel_map.get_probability_source_in_grid() 
+    prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,4)).likelihood
+    cb_bel_map.update_from_prob(Vector3r(0,4), 1)
+    current_belief = cb_bel_map.get_probability_source_in_grid()
+    assert math.isclose(current_belief/prev_belief, relative_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    assert math.isclose(current_belief-prev_belief, absolute_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    
+    
+    #%%
+    
+    #now check given a negative reading, the belief map updates as it should.
+    prev_bel = cb_bel_map.get_probability_source_in_grid() 
+    prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
+    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    current_bel = cb_bel_map.get_probability_source_in_grid()
+    assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    print((relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading) - 1) * prev_bel)
+    #due to round-off, can only get to within 2%
+    assert math.isclose(current_bel-prev_bel, absolute_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.02)
+
+#%%
+    #check holds for another negative reading
+    prev_bel = cb_bel_map.get_probability_source_in_grid() 
+    prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
+    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    current_bel = cb_bel_map.get_probability_source_in_grid()
+    assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
+    #due to round-off, can only get to within 2%
+    assert math.isclose(current_bel-prev_bel, absolute_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.02)
+    
+    #%%
+    
+    #the plot of relative change in belief looks like this:
+    import matplotlib.pyplot as plt
+    
+    
+    for j in range(1,10):
+        plt.plot([1/i for i in range(1, 100)], [relative_change_bel_pos_reading(false_positive_rate,false_negative_rate, 1/i, j/10) for i in range(1,100)], label = "Prior value at observation={}".format(j/10))
+    plt.title("Relative belief increase for a positive reading vs prior belief (alpha = 0.2, beta = 0.1, prior at observation location = 0.1")
+    #plt.ylim(0, 50)
+    plt.xlabel("Prior belief")
+    plt.ylabel("Relative change in belief")
+    plt.legend()
+    
+    plt.figure()
+    for j in range(1,10):
+        plt.plot([1/i for i in range(1, 100)], [relative_change_bel_neg_reading(false_positive_rate,false_negative_rate, 1/i, j/10) for i in range(1,100)], label = "Prior value at observation={}".format(j/10))
+    plt.title("Relative belief increase for a positive reading vs prior belief (alpha = 0.2, beta = 0.1, prior at observation location = 0.1")
+    #plt.ylim(0, 50)
+    plt.xlabel("Prior belief")
+    plt.ylabel("Relative change in belief")
+    plt.legend()
     #write some assertions here!
     
 #%%
@@ -585,7 +826,7 @@ if __name__ == "__main__":
         t1 = time.time()
         
         for i in range(no_updates):
-            bel_map.update_from_prob_optimized(Vector3r(2+i, 3+i), round(random.random()))
+            bel_map.update_from_prob_optimized_one(Vector3r(2+i, 3+i), round(random.random()))
         t2 = time.time()
         timings.append((t2 - t1)/no_updates)
     
