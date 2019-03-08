@@ -54,28 +54,25 @@ def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: floa
     return numerator/denominator
 
 def _calc_posterior_from_sensor(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha, beta):
-    
-    grid_cell_location_condition = observation_cell_loc != update_cell_loc
-    observation_reading_condition = observation_value == 1
     numerator = grid_cell_to_update_prior
     #ordered by most likely to least likely
-    if observation_value == 0 and grid_cell_location_condition:
+    if observation_value == 0 and observation_cell_loc != update_cell_loc:
         numerator = (1 - alpha) * numerator
         denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((beta) * observation_grid_loc_prior)
         
-    elif observation_value == 1 and grid_cell_location_condition:
+    elif observation_value == 1 and observation_cell_loc != update_cell_loc:
             numerator = (alpha) * numerator
             denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
             
-    elif observation_value == 1 and not grid_cell_location_condition:
+    elif observation_value == 1 and observation_cell_loc == update_cell_loc:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
         numerator = (1 - beta) * numerator
-        denominator = ((alpha) * (1-observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)
+        denominator = ((alpha) * (1-grid_cell_to_update_prior)) + ((1 - beta) * grid_cell_to_update_prior)
         
-    elif observation_value == 0 and not grid_cell_location_condition:
+    elif observation_value == 0 and observation_cell_loc == update_cell_loc:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
         numerator = beta * numerator
-        denominator = ((1 - alpha) * (1-observation_grid_loc_prior)) + (beta * observation_grid_loc_prior)
+        denominator = ((1 - alpha) * (1-grid_cell_to_update_prior)) + (beta * grid_cell_to_update_prior)
         
     else:
         raise Exception("Cannot calculate posterior when sensor readings are not 0 or 1. You provided value {}".format(observation_value))
@@ -292,16 +289,6 @@ class BeliefMap:
         denominator = (1 - alpha) - (gamma * prior_at_reading)
         return numerator/denominator
     
-    @classmethod
-    def negative_reading_belief_evolution(no_timesteps, alpha, beta, prior_at_grid_cell):
-        '''
-        Given a sequence of no_timesteps negative beliefs at an individual grid cell, calculates the belief in that grid cell after no_timesteps.
-        Formula is solution to non-linear recursion g(n+1) = beta * g(n) / (1-alpha)(1-prior) + beta * prior, wolfram alpha can solve given 
-        boundary condition g(0) = prior_at_grid_cell
-        '''
-        numerator = prior_at_grid_cell
-        denominator =  prior_at_grid_cell - ((prior_at_grid_cell-1) * (((1-alpha)/beta)**no_timesteps))
-        return numerator/denominator
     
     
 class ChungBurdickBeliefMap(BeliefMap):
@@ -359,30 +346,29 @@ class ChungBurdickBeliefMap(BeliefMap):
         Updates likelihood at all grid locations given a grid location and observation. Mult-processing might offer a nice speedup.
         '''
         self._update_from_prob_optimized(observation_grid_loc, obs_prob)
-        #self._update_from_prob_deprecated(observation_grid_loc, obs_prob)
     
     #too slow! use update_from_prob_optimized instead
-    def _update_from_prob_deprecated(self, observation_grid_loc, obs_prob):
-        '''
-        Updates likelihood at all grid locations given a grid location and observation. Mult-processing this would offer a nice speedup.
-        '''
-        
-        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
-        #this is really slow...
-        for grid_loc_to_update in self.grid.get_grid_points():
-            #prior_val_update_cell = self._get_current_likelihood_at_loc(grid_loc)
-            #_calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior)
-            #new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val_update_cell, prior_val_measurement_cell)
-            
-            grid_cell_to_update_prior = self.get_belief_map_component(grid_loc_to_update).likelihood
-            #this could be made to be more efficient - having some kind of cache that stores in advance the updates to the map given a sequence of observations could
-            #be beneficial but might not be possible with non-uniform prior
-            new_belief_value = calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, grid_cell_to_update_prior, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
-            
-            self.belief_map_components[self._get_observation_grid_index(grid_loc_to_update)] = BeliefMapComponent(grid_loc_to_update, new_belief_value)        
-
-        if self.apply_blur:
-            self.apply_gaussian_blur()
+#    def update_from_prob(self, observation_grid_loc, obs_prob):
+#        '''
+#        Updates likelihood at all grid locations given a grid location and observation. Mult-processing this would offer a nice speedup.
+#        '''
+#        
+#        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+#        #this is really slow...
+#        for grid_loc_to_update in self.grid.get_grid_points():
+#            #prior_val_update_cell = self._get_current_likelihood_at_loc(grid_loc)
+#            #_calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior)
+#            #new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val_update_cell, prior_val_measurement_cell)
+#            
+#            grid_cell_to_update_prior = self.get_belief_map_component(grid_loc_to_update).likelihood
+#            #this could be made to be more efficient - having some kind of cache that stores in advance the updates to the map given a sequence of observations could
+#            #be beneficial but might not be possible with non-uniform prior
+#            new_belief_value = calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, grid_cell_to_update_prior, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
+#            
+#            self.belief_map_components[self._get_observation_grid_index(grid_loc_to_update)] = BeliefMapComponent(grid_loc_to_update, new_belief_value)        
+#
+#        if self.apply_blur:
+#            self.apply_gaussian_blur()
 #    
             
     def get_probability_source_in_grid(self):
@@ -692,20 +678,20 @@ if __name__ == "__main__":
     cb_bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
 
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,0), 1)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 0)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 1)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,2), 0)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,0), 1)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,1), 0)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,1), 1)
+    cb_bel_map1.update_from_prob_optimized(Vector3r(0,2), 0)
     
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,0), 1)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,1), 0)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,1), 1)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,2), 0)
+    cb_bel_map2.update_from_prob(Vector3r(0,0), 1)
+    cb_bel_map2.update_from_prob(Vector3r(0,1), 0)
+    cb_bel_map2.update_from_prob(Vector3r(0,1), 1)
+    cb_bel_map2.update_from_prob(Vector3r(0,2), 0)
     
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,0), 1)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,1), 0)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,1), 1)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,2), 0)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,0), 1)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,1), 0)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,1), 1)
+    cb_bel_map3.update_from_prob_optimized_one(Vector3r(0,2), 0)
     
     
     assert math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map1.get_probability_source_in_grid(), rel_tol = 0.0001) and math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map3.get_probability_source_in_grid(), rel_tol = 0.0001)
@@ -934,7 +920,7 @@ if __name__ == "__main__":
     false_positive_rate = 0.2
     false_negative_rate = 0.1
     timings = []
-    #%%
+    
     for test_number, test_grid in enumerate(test_grids):
         bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
@@ -946,25 +932,9 @@ if __name__ == "__main__":
         #record the average time per update
         timings.append((t2 - t1)/no_updates)
 
-    #%%
     plt.figure()
-    plt.plot([(start_test_grid_size + i*step_size)**2 for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))], timings, label = "optimized timings")
-    plt.xlabel("Size of belief map grid")
-    plt.ylabel("Time taken per update (seconds)")
-    plt.legend()
-    plt.title("A plot of time taken for different methods to update belief map")
-    plt.ylim(0,60)
-    plt.xlim(0, 5700) 
-    
-    #%%
-    plt.figure()
-    grid_sizes = [(start_test_grid_size + i*step_size)**2 for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))]
-    plt.plot(grid_sizes, [timing / grid_size for timing, grid_size in zip(timings, grid_sizes)], label = "optimized timings divided by grid size")
-    plt.title("Plot of belief map update time divided by grid size")
-    plt.ylabel("Time taken to update individual grid cell")
-    plt.xlabel("Number of grid cells")
-    plt.legend()
-
+    plt.plot([(start_test_grid_size + i*step_size)**2 for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))], timings, label = "non-optimized timings")
+        
         
         
         

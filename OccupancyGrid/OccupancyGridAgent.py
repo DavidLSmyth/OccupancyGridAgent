@@ -84,15 +84,15 @@ class BaseGridAgent:
     ObservationDir = "D:/ReinforcementLearning/DetectSourceAgent/Observations"
     MockedImageDir = 'D:/ReinforcementLearning/DetectSource/Data/MockData'
     
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, alpha=None, beta=None):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
         
         #list expected types of everything here and check in future
         self.grid = grid
         
         #Record whether want to configure problem for single source or multiple sources
         self.single_source = single_source
-        self.alpha = alpha
-        self.beta = beta
+        self.false_positive_rate = false_positive_rate
+        self.false_negative_rate = false_negative_rate
         
         self._logged = logged
         self._initial_pos = initial_pos
@@ -128,7 +128,7 @@ class BaseGridAgent:
         #If single source, use modified single source belief map. 
         if single_source:
             print("Using belief map with single source update rule")
-            self.current_belief_map = create_single_source_belief_map(self.grid, prior, alpha, beta)
+            self.current_belief_map = create_single_source_belief_map(self.grid, prior, false_positive_rate, false_negative_rate)
         else:
             print("Using belief map with multiple source update rule (modelling parameter theta at all grid locations independently of each other)")
             self.current_belief_map = create_belief_map(self.grid, prior)
@@ -142,7 +142,7 @@ class BaseGridAgent:
         
         
     def reset(self):
-        self.__init__(self.grid, self.__initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.alpha, self.beta)
+        self.__init__(self.grid, self.__initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
         
     def log_msg_to_cmd(self, msg, level, log_name, should_log = True):
         if should_log:
@@ -210,14 +210,14 @@ class BaseGridAgent:
 
         
 class SimpleGridAgent(BaseGridAgent):
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, alpha=None, beta=None):
-        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, alpha, beta)
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
+        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, false_positive_rate, false_negative_rate)
         #for simple grid agent assume it is in correct grid square
         self.current_pos_measured = initial_pos
         self.no_greedy_moves = 0
         
     def reset(self):
-        self.__init__(self.grid, self._initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.alpha, self.beta)
+        self.__init__(self.grid, self._initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
 
         
     def move_agent(self, location: SimpleCoord, other_agent_positions):
@@ -294,11 +294,11 @@ class SimpleGridAgent(BaseGridAgent):
 #this is the agent to use for testing with rad source
 class SimpleGridAgentWithSources(SimpleGridAgent):
     
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, alpha=None, beta=None):
-        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, alpha, beta)
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
+        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, false_positive_rate, false_negative_rate)
         
     def reset(self):
-        self.__init__(self.grid, self._initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.alpha, self.beta)
+        self.__init__(self.grid, self._initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
     
     
     def explore_timestep(self, other_agent_positions):

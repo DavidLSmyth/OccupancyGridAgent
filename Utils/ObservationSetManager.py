@@ -45,6 +45,13 @@ class ObservationSetManager:
 
     def get_all_observations(self):
         return functools.reduce(lambda x,y: x.union(y) if x else y, self.observation_sets.values(), set())
+    
+    def get_all_observations_at_grid_location(self, grid_loc: Vector3r):
+        '''
+        Returns all agent observations made at a specified grid location
+        '''
+        return list(filter(lambda observation: observation.grid_loc == grid_loc, self.observations))
+    
         
     def get_observation_set(self, rav_name) -> typing.Set[AgentObservation]:
         '''Get list of observations from a RAV'''
