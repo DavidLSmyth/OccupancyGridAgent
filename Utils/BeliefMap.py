@@ -292,6 +292,16 @@ class BeliefMap:
         denominator = (1 - alpha) - (gamma * prior_at_reading)
         return numerator/denominator
     
+    @classmethod
+    def negative_reading_belief_evolution(no_timesteps, alpha, beta, prior_at_grid_cell):
+        '''
+        Given a sequence of no_timesteps negative beliefs at an individual grid cell, calculates the belief in that grid cell after no_timesteps.
+        Formula is solution to non-linear recursion g(n+1) = beta * g(n) / (1-alpha)(1-prior) + beta * prior, wolfram alpha can solve given 
+        boundary condition g(0) = prior_at_grid_cell
+        '''
+        numerator = prior_at_grid_cell
+        denominator =  prior_at_grid_cell - ((prior_at_grid_cell-1) * (((1-alpha)/beta)**no_timesteps))
+        return numerator/denominator
     
     
 class ChungBurdickBeliefMap(BeliefMap):

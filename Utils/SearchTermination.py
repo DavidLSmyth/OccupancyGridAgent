@@ -141,8 +141,10 @@ class IndividualGridCellSearchTermination(UpperLowerBoundTotalBeliefSearchTermin
         if self._accept_source_in_grid(belief_map):
             #check if the confidence interval is narrow enough
             greatest_likelihood_component = belief_map.get_most_likely_component()
+            #get the second most likely component
             second_greatest_likelihood_component = belief_map.get_ith_most_likely_component(2)
-            return greatest_likelihood_component.likelihood - second_greatest_likelihood_component.likelihood > self.min_belief_difference
+            print(greatest_likelihood_component.likelihood - second_greatest_likelihood_component.likelihood)
+            return (greatest_likelihood_component.likelihood - second_greatest_likelihood_component.likelihood) > self.min_belief_difference
         else:
             return False
         
@@ -274,26 +276,85 @@ if __name__ == '__main__':
     
 
     
-
-    
-#
-#    def negative_reading_belief_evolution(no_timesteps, alpha, beta, delta):
-#        numerator = -delta * (alpha + beta - 1)
-#        denominator = delta  * (-alpha + beta +1)
-#        demoninator_second_expression = (((1-alpha))/beta)**no_timesteps
-#        demoninator_second_expression *= (-1 + alpha + beta + delta - alpha*delta + beta*delta)
-#        denominator -= demoninator_second_expression 
-#        return numerator/denominator
-#    
-    def negative_reading_belief_evolution(no_timesteps, alpha, beta, delta):
-        numerator = delta
-        denominator =  delta - ((delta-1) * (((1-alpha)/beta)**no_timesteps))
+    def negative_reading_belief_evolution(no_timesteps, alpha, beta, prior_at_grid_cell):
+        numerator = prior_at_grid_cell
+        denominator =  prior_at_grid_cell - ((prior_at_grid_cell-1) * (((1-alpha)/beta)**no_timesteps))
         return numerator/denominator
     
     print("Actual value: ", cb_bel_map1.get_belief_map_component(Vector3r(1,2)).likelihood)
     print("Predicted value: ", negative_reading_belief_evolution(number_negative_readings, false_positive_rate,false_negative_rate, set_uniform_prior))
     
     assert math.isclose(cb_bel_map1.get_belief_map_component(Vector3r(1,2)).likelihood, negative_reading_belief_evolution(number_negative_readings, false_positive_rate,false_negative_rate, set_uniform_prior), rel_tol = 0.01)
+
+
+    #%%
+    #Test that search termination criteria for difference between most likely and second most likely is great enough.
+    
+    lower_bound = 0.05
+    upper_bound = 0.85
+    upper_lower_search_termination = UpperLowerBoundTotalBeliefSearchTermination(lower_bound, upper_bound)
+    belief_difference = 0.6
+    individual_grid_cell_search_termination = IndividualGridCellSearchTermination(lower_bound, upper_bound, belief_difference)
+    #prob of postive reading at non-source location = false alarm = alpha
+    false_positive_rate = 0.1
+    #prob of negative reading at source location = missed detection = beta
+    false_negative_rate = 0.2
+    test_grid = UE4Grid(1, 1, Vector3r(0,0), 5, 3)
+    set_uniform_prior = 0.008
+    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, set_uniform_prior ) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: set_uniform_prior  for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    #%%
+    from Utils.ObservationSetManager import ObservationSetManager
+    observation_set_manager = ObservationSetManager("agent1")
+    #add some positive readings at some other grid cell to test that search doesn't terminate even when 
+    #belief in individual grid cell is very high
+    for i in range(3):
+        cb_bel_map1.update_from_observation(AgentObservation(Vector3r(4,2),1, i, i, 'agent1'))
+        observation_set_manager.update_with_observation(AgentObservation(Vector3r(4,2),1, i, i, 'agent1'))
+    #make sure that the difference in probabilities is greater than the belief_difference specified
+
+#%%
+    assert not upper_lower_search_termination.should_end_search(cb_bel_map1), cb_bel_map1.get_probability_source_in_grid()
+    print(cb_bel_map1.get_belief_map_component(Vector3r(4,2)).likelihood)
+    print(cb_bel_map1.get_belief_map_component(Vector3r(2,3)).likelihood)
+    i = 4
+    while not upper_lower_search_termination.should_end_search(cb_bel_map1):
+        assert cb_bel_map1.get_probability_source_in_grid() > lower_bound
+        print("probability source in grid: ", cb_bel_map1.get_probability_source_in_grid())
+        cb_bel_map1.update_from_observation(AgentObservation(Vector3r(2,3),1, i, 10+i, 'agent1'))
+        print('\n')
+        print(cb_bel_map1.get_belief_map_component(Vector3r(4,2)).likelihood)
+        print(cb_bel_map1.get_belief_map_component(Vector3r(2,3)).likelihood)
+        observation_set_manager.update_with_observation(AgentObservation(Vector3r(2,3),1, i, 10+i, 'agent1'))
+        i+=1
+            
+    print("probability source in grid: ", cb_bel_map1.get_probability_source_in_grid())
+    assert cb_bel_map1.get_belief_map_component(Vector3r(4,2)).likelihood > 0.4    
+    assert cb_bel_map1.get_belief_map_component(Vector3r(2,3)).likelihood < 0.9
+    #%%
+    # what happens is that the location 4,2 gets updated to probability 0.8050314465408805, then 
+    # 2,3 gets updated from 0.0015723270440251573 to 0.09155937052932762, which reduces the probability of 4,2 to 0.732474964234621. 
+    # This pushes the search belief over the threshold of 0.85 and also pushes the probability difference between the two grid cells 
+    # to a value greater than 0.9
+    print("Difference between first and second most likely grid components: ", cb_bel_map1.get_belief_map_component(Vector3r(4,2)).likelihood - cb_bel_map1.get_belief_map_component(Vector3r(2,3)).likelihood)
+    assert not individual_grid_cell_search_termination.should_end_search(cb_bel_map1, observation_set_manager)
+     
+    #now update with null observations and check that the difference between the first and second most likely grid locations
+    #is within the threshold    
+    for i in range(3):
+        cb_bel_map1.update_from_observation(AgentObservation(Vector3r(4,2),0, i+50, i+30, 'agent1'))
+        observation_set_manager.update_with_observation(AgentObservation(Vector3r(4,2),0, i+50, i+50, 'agent1'))
+    #
+    print("Difference between first and second most likely grid components: ", cb_bel_map1.get_belief_map_component(Vector3r(2,3)).likelihood - cb_bel_map1.get_belief_map_component(Vector3r(4,2)).likelihood)
+    assert individual_grid_cell_search_termination.should_end_search(cb_bel_map1, observation_set_manager)
+
+    #%%
+
+
+
+
+
+
 
 
 
