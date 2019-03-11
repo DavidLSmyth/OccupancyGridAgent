@@ -149,6 +149,44 @@ class ChungBurdickSingleSourceSensor:
 #            denominator = 
 #        
         return self.get_detection_val(location)    
+    
+class MultipleSourceSensor:
+    '''A sensor which returns the probability of detection at a location, given the knowledge that there is a single source present'''
+    def __init__(self, false_positive_rate, false_negative_rate, source_locations: list):
+        if not isinstance(source_locations, list):
+            raise Exception("Please provide a list of source_locations")
+        if not all([isinstance(source_location, Vector3r) for source_location in source_locations]):
+            raise Exception("Please provide a list of source_locations instead of {}".format(source_locations[0]))
+        self.false_positive_rate = false_positive_rate
+        self.false_negative_rate = false_negative_rate
+        self.source_locations = source_locations
+        print(source_locations)
+        
+    def get_detection_val(self,location):
+        rand_no = random.random()
+        if location in self.source_locations:
+            print("should be postive")
+            #0 reading (false negative) generated with probability beta at grid location where source actually lies
+            if rand_no < self.false_negative_rate:
+                return 0
+            else:
+                return 1
+        else:
+            #1 reading (false positive) generated with probability alpha at grid location where source is not actually present
+            if rand_no < self.false_positive_rate:
+                return 1
+            else:
+                return 0
+        
+    def get_probability(self, location):
+#        '''Returns probability of detection'''
+#        detection_val = self.get_detection_val(self.location)
+#        if detection_val == 1:
+#            numerator = (1-self.beta)
+#            denominator = 
+#        
+        return self.get_detection_val(location)  
+    
 #
 #def get_image_response(image_loc: str):
 #    headers = {'Prediction-Key': "fdc828690c3843fe8dc65e532d506d7e", "Content-type": "application/octet-stream", "Content-Length": "1000"}

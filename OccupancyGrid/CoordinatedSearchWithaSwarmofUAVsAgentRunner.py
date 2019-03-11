@@ -20,7 +20,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection, SaccadicActionSelection
 from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
-from Utils.Sensors import RadModel, RadSensor, ChungBurdickSingleSourceSensor
+from Utils.Sensors import RadModel, RadSensor, ChungBurdickSingleSourceSensor, MultipleSourceSensor
 from Utils.BeliefMap import BeliefMapComponent, ChungBurdickBeliefMap
 from Utils.Prior import generate_gaussian_prior, save_gaussian_prior, generate_uniform_prior
 from Utils.ProgressBar import progress_bar
@@ -42,14 +42,18 @@ def run_t_timesteps(occupancy_grid_agents, no_timesteps, threshold, no_extra_tim
             run_timestep(occupancy_grid_agent, [other_agent.current_pos_intended for other_agent in filter(lambda other_agent: occupancy_grid_agent.agent_name != other_agent.agent_name, occupancy_grid_agents)])
             #print("\nAgent {} is at location {}.".format(occupancy_grid_agent.agent_name, occupancy_grid_agent.current_pos_intended))
             #print("T step " + str(_))
-            if occupancy_grid_agent.current_belief_map.get_probability_source_in_grid() < threshold:
-                extra_time_steps = 0
+            try:
+                if occupancy_grid_agent.current_belief_map.get_probability_source_in_grid() < threshold:
+                    extra_time_steps = 0
+                    
+                if occupancy_grid_agent.current_belief_map.get_probability_source_in_grid() > threshold and extra_time_steps < no_extra_timesteps:
+                    extra_time_steps += 1
+                    
+                if extra_time_steps >= no_extra_timesteps:
+                    return timestep
                 
-            if occupancy_grid_agent.current_belief_map.get_probability_source_in_grid() > threshold and extra_time_steps < no_extra_timesteps:
-                extra_time_steps += 1
-                
-            if extra_time_steps >= no_extra_timesteps:
-                return timestep
+            except Exception as e:
+                pass
             
                 #only run for a few more steps
                  #no_timesteps = timestep + 5
@@ -107,39 +111,43 @@ if __name__ == "__main__":
     
     
     #x then y
-    grid = UE4Grid(1, 1, Vector3r(0,0), 50, 50)    
-    means = [1,3]
-    covariance_matrix = [[7.0, 0], [0, 15]]
+    grid = UE4Grid(1, 1, Vector3r(0,0), 10, 8)
+    means = [18,16]
+    covariance_matrix = [[7.0, 0], [0, 3]]
     prior = generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum = 0.5)
     prior = generate_uniform_prior(grid)
     
     
-    source_location = Vector3r(4,3)
-    agent_start_pos = Vector3r(5,8)
+    source_locations = [Vector3r(1,1), Vector3r(5, 6), Vector3r(10,6)]
+    agent_start_pos = Vector3r(10,8)
     saccadic_selection_method = SaccadicActionSelection(grid)
-    nearest_neighbor_selection = GreedyActionSelection(eff_radius = min([grid.lat_spacing, grid.lng_spacing]))
-
+    #nearest_neighbor_selection = GreedyActionSelection(eff_radius = min([grid.lat_spacing, grid.lng_spacing]))
+    sweep_action_selection_method = TSPActionSelection(grid, agent_start_pos)
+    #epsilon_greedy_action_selection_method  = EpsilonGreedyActionSelection(0.2, eff_radius = 4 * min([grid.lat_spacing, grid.lng_spacing]))
+    
     #alpha is the "false alarm" rate (of false positive)
     false_positive_rate = 0.2
     #beta is the "missed detection" rate (or false negative)
-    false_negative_rate = 0.25
-    cb_single_source_sensor = ChungBurdickSingleSourceSensor(false_positive_rate, false_negative_rate, source_location)
+    false_negative_rate = 0.12
+    #cb_single_source_sensor = ChungBurdickSingleSourceSensor(false_positive_rate, false_negative_rate, source_location)
+
+    cb_single_source_sensor = MultipleSourceSensor(false_positive_rate, false_negative_rate, source_locations)
 
     #agent_name: str, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], alpha: 'prob of false pos', beta: 'prob of false neg', apply_blur = False):    
     #cb_bel_map = ChungBurdickBeliefMap("agent1", grid, [BeliefMapComponent(prior_i, prior[prior_i]) for prior_i in prior], prior, alpha, beta)
-    single_source = True
+    single_source = False
     #alpha = 0.2
     #beta = 0.1
     
-    agent3 = SimpleGridAgentWithSources(grid, agent_start_pos, nearest_neighbor_selection.get_move, -10, agent3_name, cb_single_source_sensor, other_active_agents = [], comms_radius = 2, prior = prior, logged=False, single_source=single_source, false_positive_rate=false_positive_rate, false_negative_rate=false_negative_rate)
+    agent3 = SimpleGridAgentWithSources(grid, agent_start_pos, sweep_action_selection_method.get_move, -10, agent3_name, cb_single_source_sensor, other_active_agents = [], comms_radius = 2, prior = prior, logged=False, single_source=single_source, false_positive_rate=false_positive_rate, false_negative_rate=false_negative_rate)
     #agent3 = SimpleGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -10, 0.3, agent3_name)
         
     #run_t_timesteps([agent1, agent2], 60)
-    threshold = 1.01
+    threshold = 0.9
     
     #agent3.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent3BelMapPrior.png")
 
-    max_timesteps = 2000
+    max_timesteps = 1200
     print("Running with max {} timesteps".format(max_timesteps))
     no_timesteps_to_discovery = run_t_timesteps([agent3], max_timesteps, threshold)
     no_timesteps_to_discovery = max_timesteps if not no_timesteps_to_discovery else no_timesteps_to_discovery
@@ -147,6 +155,26 @@ if __name__ == "__main__":
     print("\n\nSaving visualisations")
     #agent1.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent1BelMap.png")
     #agent2.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent2BelMap.png")
+
+
+    #use this to show plot multiple sources
+    belief_map = agent3.current_belief_map
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    x, y, z = [], [], []
+    for belief_map_component in belief_map.get_belief_map_components():
+        x.append(belief_map_component.grid_loc.x_val)
+        y.append(belief_map_component.grid_loc.y_val)
+        z.append(belief_map_component.likelihood)
+        
+    print(z)
+    ax = fig.gca(projection='3d')
+    z_lim = max(z) * 1.05
+    ax.set_zlim3d(0, z_lim)
+    ax.plot_trisurf(x, y, z)
+    plt.savefig("C:\\Users\\13383861\\Downloads\\multi.png")
+    import sys
+    sys.exit(0)
 
     #grid, initial_pos, move_from_bel_map_callable, height, epsilon, multirotor_client, agent_name, prior = {}
    # OccupancyGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.3, agent_name, other_active_agents).explore_t_timesteps(args.no_timesteps)
@@ -163,7 +191,7 @@ if __name__ == "__main__":
     move_visualisation_fp2d = home_dir + "\\Visualisations\\Agent3MoveMap2d.png"
     analyser.save_move_visualisation2d(move_visualisation_fp2d)
     
-    bel_map_visualisation_fp = home_dir + "Visualisations\\Agent3BelMap.png"
+    bel_map_visualisation_fp = home_dir + "\\Visualisations\\Agent3BelMap.png"
     analyser.save_belief_map_visualisation(bel_map_visualisation_fp)
     #move_animation_fp = "D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent3MoveAnimation.mp4"
     #analyser.save_move_animation(move_animation_fp, sources_locations)
@@ -182,7 +210,7 @@ if __name__ == "__main__":
     #time.sleep(10)
     
     
-    analyser.save_agent_belief_map_animation_with_sources(bel_map_animation_fp, no_timesteps_to_discovery, source_location)
+    #analyser.save_agent_belief_map_animation_with_sources(bel_map_animation_fp, no_timesteps_to_discovery, source_location)
     #destroy_rav(client, agent_name)
     t2 = time.time()
     print("Time taken for agents to locate source: ", t2-t1)

@@ -7,7 +7,6 @@ Created on Tue Nov 13 13:17:07 2018
 
 import sys
 sys.path.append('..')
-sys.path.append("D:\ReinforcementLearning\DetectSourceAgent")
 import os
 import time
 import logging

@@ -10,25 +10,27 @@ import csv
 import sys
 #update path so other modules can be imported
 sys.path.append('..')
+sys.path.append('.')
 
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 
 #an agent precept consists of a grid location, a detection probability, a timestep, a timestamp and the observer name
-_AgentObservation = typing.NamedTuple('AgentObservation', [('grid_loc', Vector3r),
+_AgentObservationBase = typing.NamedTuple('_AgentObservationBase', [('grid_loc', Vector3r),
                                                     ('probability', float),
                                                     ('timestep', int), 
                                                     ('timestamp', float), 
                                                     ('observer_name', str)])
 
 #%%
-class AgentObservation(_AgentObservation):
+class AgentObservation(_AgentObservationBase):
     '''A wrapper class of _AgentAnalysisState to enforce correct data types'''
     def __new__(cls, grid_loc,probability,timestep,timestamp,observer_name) -> '_AgentObservation':
         #does it make sense to just leave args in the constructor and let the return line handle an incorrect number of args
         args = (grid_loc,probability,timestep,timestamp,observer_name)
-        return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservation.__annotations__.values())])
+        #enforce correct data types
+        return super(AgentObservation, cls).__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservationBase.__annotations__.values())])
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -47,7 +49,7 @@ class AgentObservation(_AgentObservation):
                         self.observer_name))
    
 #%%    
-class BinaryAgentObservation(_AgentObservation):
+class BinaryAgentObservation(_AgentObservationBase):
     '''A class that handles binary observations - as assumed in 
     A Decision-Making Framework for Control Strategies in Probabilistic Search'''
     def __new__(cls, grid_loc,binary_sensor_reading,timestep,timestamp,observer_name) -> '_AgentObservation':
@@ -55,7 +57,7 @@ class BinaryAgentObservation(_AgentObservation):
         if binary_sensor_reading not in [0,1]:
             raise Exception("Binary sensor reading not valid: {}".format(binary_sensor_reading))
         args = (grid_loc, binary_sensor_reading, timestep, timestamp, observer_name)
-        return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservation.__annotations__.values())])
+        return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservationBase.__annotations__.values())])
     
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -91,8 +93,17 @@ class AgentObservations():
     def get_all_observations_at_position(self, grid_loc: Vector3r):
         return list(filter(lambda observation: observation.grid_loc == grid_loc, self.observations))
     
+    
+#%%
+  
+    
+    
+    
+    
+import functools
+    
 def _get_agent_observation_for_csv(grid_loc,probability,timestep,timestamp,observer_name):
-    return f"{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}"
+    return functools.reduce(lambda x, y: str(x)+str(y), [grid_loc.y_val,grid_loc.x_val,grid_loc.z_val,probability,timestep,timestamp,observer_name])
      
 def get_agent_observation_for_csv(agent_observation: AgentObservation):
     '''Returns elements of agent state that are important for analysis that can be written to csv. Position, battery cap., total_dist_travelled, battery_consumed, occ_grid'''
@@ -117,7 +128,8 @@ def _update_observations_file(file_path, agent_observation: AgentObservation):
     with open(file_path, 'a') as f:
         f.write('\n'+get_agent_observation_for_csv(agent_observation))
         
-def read_agent_observations_for_analysis_file(file_path: str)->typing.List[AgentObservation]:
+def get_agent_observations_from_file(file_path: str)->typing.List[AgentObservation]:
+    '''Reads agent observations from a file and returns a list of agent observation objects'''
     #maybe have a type mapping for this
     try:
         with open(file_path) as f:

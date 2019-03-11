@@ -21,13 +21,29 @@ from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
 #calculation of posterior distribution is bayes likelihood update formula
 #This is the posterior distribution of a single sensor reading, independent of all other sensor readings
 #calc_posterior = lambda observation, prior: (prior * observation) / ((prior * observation) + (1-prior)*(1-observation))
+#def calc_posterior(observation, prior):
+#    numerator = (prior * observation)
+#    denominator = ((prior * observation) + (1-prior)*(1-observation))
+#    if denominator == 0:
+#        #this is a quick and easy solution, should use log odds to solve this properly
+#        denominator = 0.0000000000000001
+#    
+#    return numerator / denominator
+
 def calc_posterior(observation, prior):
-    numerator = (prior * observation)
-    denominator = ((prior * observation) + (1-prior)*(1-observation))
-    #if denominator == 0:
-        #this is a quick and easy solution, should use log odds to solve this properly
-    #    denominator = 0.0000000000000001
-    return numerator / denominator
+    alpha = 0.2
+    beta = 0.12
+    if observation == 1:
+        return(1-beta) * prior /((prior * (1 - beta)) + (1-prior)*(alpha))
+    else:
+        return(beta) * prior /((prior * (beta)) + (1-prior)*(1-alpha))
+#    numerator = (prior * observation)
+#    denominator = 
+#    if denominator == 0:
+#        #this is a quick and easy solution, should use log odds to solve this properly
+#        denominator = 0.0000000000000001
+#    
+#    return numerator / denominator
 
 #This calculates the posterior distribution of detection of a source in the grid to be explored, 
 #where there is no independence between grid cells

@@ -7,43 +7,119 @@ Created on Tue Nov 13 11:45:44 2018
 
 import sys
 sys.path.append('..')
-sys.path.append('.')
 import typing
 import functools
-from Utils.AgentObservation import AgentObservation
+import csv
+from Utils.AgentObservation import AgentObservation, BinaryAgentObservation, AgentObservationBase
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 from Utils.BeliefMap import (create_belief_map, create_belief_map_from_observations,
  create_single_source_belief_map_from_observations, create_confidence_interval_map_from_observations)
 
+
+class AgentObservationFileManager:
+    
+    '''
+    A class that can read agent observations from a csv formatted file and write agent observations to a file. Each agent has its own observation file manager
+    which records observations made by it (and other agent observations that have been communicated to it) up to time t. 
+    '''    
+   
+    agent_observation_file_header = "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}".replace('{','').replace('}','')
+    def __init__(self, agent_name, file_path = None):
+        if not file_path:
+            self.file_path = "../Observations/" + agent_name.strip() + ".csv"
+        else:
+            self.file_path = file_path
+        self._init_file_handle()
+        self.init_file_header()
+    
+    def _init_file_handle(self):
+        #open file for both reading and writing
+        try:
+            self.file_handle = open(self.file_path, 'r+')
+        except FileNotFoundError as e:
+            print("Consider using the convention to organise agent files")
+            print(sys.path)
+            raise e
+            
+    def init_file_header(self):
+        self.file_handle.write(AgentObservationFileManager.agent_observation_file_header)
+    
+    def update_file_with_observations(self, agent_observations):
+        if not isinstance(agent_observations, list):
+            raise Exception("Can only process a list of agent observations")
+        else:
+            for agent_observation in agent_observations:
+                self.update_file_with_observation(agent_observation)
+        
+    def update_file_with_observation(self, agent_observation):
+        if not isinstance(agent_observation, AgentObservation):
+            raise Exception("Can only write object of type AgentObservation to file")
+        else:
+            self.file_handle.write(self._get_formatted_agent_observation_for_csv(agent_observation))
+    
+    def _get_formatted_agent_observation_for_csv(self, agent_observation):
+        return "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}".format(**agent_observation._asdict())
+    
+    def get_agent_observation_file_path(self):
+        return self.file_path        
+    
+    def get_str_all_observations_from_file(self):
+        return str(self.read_all_observations_from_file())
+        
+    def read_all_observations_from_file(self):
+        '''
+        Returns all observations from file associated with agent
+        '''
+        try:
+            reader = csv.reader(self.file_handle)
+            #header = next(reader)
+            #read the header and then throw it away
+            next(reader)
+            return [AgentObservation(Vector3r(row[1], row[0], row[2]),*row[3:]) for row in reader]
+        #not sure how this could be handled for now
+        except Exception as e:
+            raise e
+            
+    def get_agent_observations_from_file(self) -> typing.List[AgentObservation]:
+        '''
+        Returns all observations recorded only by the agent that this manager corresponds to.
+        '''
+        return list(filter(lambda x: x.observer_name == self.agent_name, self.read_all_observations_from_file()))
+    
 #%%
 class ObservationSetManager:
     
     '''
-    Manages the sensor measurements of other agents. Observations don't have to be taken at disrete locations - 
+    Manages and stores the recieved of sensor measurements of other agents. Observations don't have to be taken at disrete locations - 
     the continuous position can be recorded and the grid location inferred from this.
-    Calculating a belief map from these sets of observations requires a grid so that each recorded observation can
-    be 
+    Agent belief at time t can be calculated from this set of observations.
+    Observations are recorded in a csv file. 
     '''
     
-    def __init__(self, agent_name: 'name of the agent that owns this observation list manager'):
+    def __init__(self, agent_name: 'name of the agent that owns this observation list manager', observation_file_path: "The path at which agent observations will be stored" = None):
 
         #key value pairs of form agent_name: set of AgentObservations
         self.observation_sets = dict()
         self.agent_name = agent_name
         #agent should initialize its own observations
-        self.init_rav_observation_set(self.agent_name)    
+        self.init_rav_observation_set(self.agent_name)
+        self.agent_observation_file_manager = AgentObservationFileManager(agent_name, observation_file_path)
     
     #really strange behaviour: using this initialises the class with observations that don't exist... self.observation_sets[rav_name] = set()
     def init_rav_observation_set(self, rav_name, observations = None):
-        '''initialise a new list of observations for a RAV'''
+        '''initialise a new list of observations for an agent'''
+        #if there are no observations, just initialize the agent_observations cprresponding to the agent name as an emtpy set
         if not observations:
             self.observation_sets[rav_name] = set()
         else:
             self.observation_sets[rav_name] = observations
 
     def get_all_observations(self):
+        '''
+        Reutrns all recorded observations from all agents
+        '''
         return functools.reduce(lambda x,y: x.union(y) if x else y, self.observation_sets.values(), set())
     
     def get_all_observations_at_grid_location(self, grid_loc: Vector3r):
@@ -54,41 +130,57 @@ class ObservationSetManager:
     
         
     def get_observation_set(self, rav_name) -> typing.Set[AgentObservation]:
-        '''Get list of observations from a RAV'''
+        '''Get list of observations from a specific agent'''
         return self.observation_sets[rav_name]
     
     def update_with_observation(self, observation: AgentObservation):
+        '''Update the observation set with an observation made from an agent'''
         if observation.observer_name not in self.observation_sets:
             self.init_rav_observation_set(observation.observer_name)
         #if observation not already included
         if observation not in self.observation_sets[observation.observer_name]:
             self.observation_sets[observation.observer_name].update(set([observation]))
+            self.agent_observation_file_manager.update_file_with_observation(observation)
             return observation
         else:
             return None
     
-    def update_rav_obs_set(self, rav_name, observations: typing.Set[AgentObservation]):
+    def update_agent_observation_set(self, observations: typing.Set[AgentObservation]):
+        '''
+        Updates the set of observations associated with an agent with potentially new observations
+        '''
+        for observation in observations:
+            self.update_with_observation(observation)
         #check if rav is present before updating
-        if rav_name not in self.observation_sets:
-            self.init_rav_observation_set(rav_name)
+        #if rav_name not in self.observation_sets:
+        #    self.init_rav_observation_set(rav_name)
         #this avoids recording duplicate observations
-        self.observation_sets[rav_name].update(observations)
+        #self.observation_sets[rav_name].update(observations)
         
-    def get_belief_map_at_timestep(self, grid, prior, timestep, agent_name, single_source = False):
-        '''Returns the agent belief/occupancy map at specified timestep'''
-        agent_beliefs = self.get_observation_set(agent_name)
-        agent_beliefs_before_timestep = list(filter(lambda observation: observation.timestep < timestep, agent_beliefs))
-        if single_source:
-            return create_single_source_belief_map_from_observations(grid, agent_beliefs_before_timestep, prior)
-            
+    def get_belief_map_at_timestep(self, grid, prior, timestep, agent_name, single_source = False, use_other_agent_observations = False):
+        '''Returns the agent belief/occupancy map at specified timestep. Can specify whether to use other agent observations or not'''
+        if use_other_agent_observations:
+            agents_for_belief_map = set(all(self.observation_sets.keys()))
         else:
-            return create_belief_map_from_observations(grid, agent_beliefs_before_timestep, prior)
+            agents_for_belief_map = set([agent_name])
+            
+        observations_for_belief_map  = self._get_belief_map_using_specific_agent_observations_at_timestep(grid, prior, agents_for_belief_map, timestep, single_source) 
+        if single_source:
+            return create_single_source_belief_map_from_observations(grid, observations_for_belief_map, prior)
+        else:
+            return create_belief_map_from_observations(grid, observations_for_belief_map, prior)
         
-        
-    def update_from_other_obs_list_man(self, other):
+    def _get_agent_observations_at_timestep(self, agent_names: "names of the agents whose observations will be used to create the belief map", timestep):
+        '''
+        Given a list of agent names, a timestep, returns the observations corresponding to those agents before the timestep.
+        '''
+        return list(filter(lambda observation: observation.timestep < timestep and observation.observer_name in agent_names, self.get_all_observations()))
+      
+
+    def update_from_other_obs_set_man(self, other):
         '''Might need to check that the timestamps must be different...'''
         for rav_name, observation_set in other.observation_sets.items():
-            self.update_rav_obs_set(rav_name, observation_set)
+            self.update_agent_obs_set(rav_name, observation_set)
             
     def get_discrete_belief_map_from_observations(self, grid):
         '''Given a descrete grid, returns a belief map containing the likelihood of the source
@@ -109,6 +201,8 @@ class ObservationSetManager:
         continuous position of the RAV. I.E. transform the discrete PDF as above to a 
         continuous one.'''
         pass
+
+#%%
 
 
 #%%

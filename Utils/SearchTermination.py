@@ -167,7 +167,8 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         if not isinstance(bel_map, ChungBurdickBeliefMap):
             raise NotImplementedError("Calculating the log likelihood ratio is only implemented for the single source framework")
         else:
-            return math.log((1-bel_map.get_probability_source_in_grid())/bel_map.get_probability_source_in_grid())
+            raise NotImplementedError("This has not been implemented yet")
+            #return math.log((1-bel_map.get_probability_source_in_grid())/bel_map.get_probability_source_in_grid())
     
     def calculate_next_s_i(self, s_i):
         next_s_i = s_i + log_likelihood_ratio(s_i)

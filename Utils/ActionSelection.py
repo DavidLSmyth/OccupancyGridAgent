@@ -13,6 +13,7 @@ sys.path.append('..')
 
 from sklearn.cluster import KMeans
 import numpy as np
+from abc import ABC, abstractmethod
 
 from Utils.AgentObservation import AgentObservation
 from Utils.ObservationSetManager import ObservationSetManager
@@ -27,7 +28,7 @@ from Utils.Timer import timed
 
 #%%
 
-class BaseActionSelection:
+class BaseActionSelection(ABC):
     def __init__(self):
         pass
     
@@ -133,6 +134,8 @@ class TSPNNActionSelection(BaseActionSelection):
         self.grid = grid
         self.tsp_solver = TSPSolver(self.grid.get_grid_points(), dist_calculator = lambda coord1, coord2: coord1.distance_to(coord2))
         self.moves = self.tsp_solver.nn_tsp(start_node)
+        assert len(self.moves) == len(self.grid.get_grid_points())
+        assert self.moves[0] == start_node
         #self.moves = self.tsp_solver.nn_tsp(start = self.start_node)
         self.move_iterator = iter(self.moves)
 
@@ -244,6 +247,18 @@ if __name__ == "__main__":
     sac_action_selection = SaccadicActionSelection(test_grid)
     assert sac_action_selection.get_move(belief_map1, Vector3r(6,5), []) == (False,Vector3r(2,0))
     
+    #%%
+
+    grid = UE4Grid(1, 1, Vector3r(0,0), 10, 8)
+    grid.get_grid_points()
+    agent_start_pos = Vector3r(10,8)
+    tsp = TSPActionSelection(grid, agent_start_pos)
+    moves = tsp.get_moves()
+    print(list(map(lambda x: x.x_val, moves)))
+    print(list(map(lambda x: x.y_val, moves)))
+    import matplotlib.pyplot as plt
+    plt.figure()
     
-    
-    
+    plt.plot(list(map(lambda x: x.x_val, moves)), list(map(lambda x: x.y_val, moves)))
+        
+
