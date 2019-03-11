@@ -10,21 +10,89 @@ sys.path.append('..')
 import typing
 import functools
 import csv
-from Utils.AgentObservation import AgentObservation, BinaryAgentObservation, AgentObservationBase
+from Utils.AgentObservation import AgentObservation
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 from Utils.BeliefMap import (create_belief_map, create_belief_map_from_observations,
  create_single_source_belief_map_from_observations, create_confidence_interval_map_from_observations)
 
+class AgentObservationFileReader:
+    def __init__(self, agent_name, file_path = None):
+        if not file_path:
+            self.file_path = "Observations/" + agent_name.strip() + ".csv"
+        else:
+            self.file_path = file_path
+        self._init_file_handle()
+        
+    def _init_file_handle(self):
+        #open file for both reading and writing
+        try:
+            self.file_handle = open(self.file_path, 'r+')
+        except FileNotFoundError as e:
+            print("Consider using the convention to organise agent files")
+            print(sys.path)
+            raise e
+        
+    def get_str_all_observations_from_file(self):
+        return str(self.read_all_observations_from_file())
+        
+    #this should probably be cached instead of being read often
+    def read_all_observations_from_file(self):
+        '''
+        Returns all observations from file associated with agent as AgentObservations 
+        '''
+        try:
+            self.file_handle.seek(0)
+            reader = csv.reader(self.file_handle)
+            #header = next(reader)
+            #read the header and then throw it away
+            next(reader)
+            #reset the file handle to it's start position for reading again
+            return [AgentObservation(Vector3r(row[1], row[0], row[2]),*row[3:]) for row in reader]
+        #not sure how this could be handled for now
+        except Exception as e:
+            raise e
+            
+    def get_agent_observations_from_file_raw(self, timestep = None):
+        '''
+        Returns all observations from file associated with agent as a string. If timestep is provided then returns all observations before timestep
+        '''
+        self.file_handle.seek(0)
+        if not timestep:
+            return self.file_handle.readlines()
+        else:
+            all_lines = self.file_handle.readlines()
+            #print([line.split(',')[4] for line in all_lines])
+            return list(filter(lambda line: line.split(',')[4] != 'timestep' and int(line.split(',')[4]) <= timestep, all_lines))
+        
+#            reader = csv.reader(self.file_handle)
+#            #header = next(reader)
+#            #read the header and then throw it away
+#            next(reader)
+#            #reset the file handle to it's start position for reading again
+#            return '\n'.join([','.join(row) for row in reader])
 
-class AgentObservationFileManager:
+        #not sure how this could be handled for now
+
+            
+    def get_agent_observations_from_file(self) -> typing.List[AgentObservation]:
+        '''
+        Returns all observations recorded only by the agent that this manager corresponds to.
+        '''
+        return list(filter(lambda x: x.observer_name == self.agent_name, self.read_all_observations_from_file()))
+    
+    def get_agent_observation_file_path(self):
+        return self.file_path
+    
+    
+class AgentObservationFileWriter:
     
     '''
     A class that can read agent observations from a csv formatted file and write agent observations to a file. Each agent has its own observation file manager
     which records observations made by it (and other agent observations that have been communicated to it) up to time t. 
     '''    
-   
+   #maybe this should go in a config file
     agent_observation_file_header = "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}".replace('{','').replace('}','')
     def __init__(self, agent_name, file_path = None):
         if not file_path:
@@ -44,7 +112,7 @@ class AgentObservationFileManager:
             raise e
             
     def init_file_header(self):
-        self.file_handle.write(AgentObservationFileManager.agent_observation_file_header)
+        self.file_handle.write(AgentObservationFileWriter.agent_observation_file_header)
     
     def update_file_with_observations(self, agent_observations):
         if not isinstance(agent_observations, list):
@@ -65,28 +133,6 @@ class AgentObservationFileManager:
     def get_agent_observation_file_path(self):
         return self.file_path        
     
-    def get_str_all_observations_from_file(self):
-        return str(self.read_all_observations_from_file())
-        
-    def read_all_observations_from_file(self):
-        '''
-        Returns all observations from file associated with agent
-        '''
-        try:
-            reader = csv.reader(self.file_handle)
-            #header = next(reader)
-            #read the header and then throw it away
-            next(reader)
-            return [AgentObservation(Vector3r(row[1], row[0], row[2]),*row[3:]) for row in reader]
-        #not sure how this could be handled for now
-        except Exception as e:
-            raise e
-            
-    def get_agent_observations_from_file(self) -> typing.List[AgentObservation]:
-        '''
-        Returns all observations recorded only by the agent that this manager corresponds to.
-        '''
-        return list(filter(lambda x: x.observer_name == self.agent_name, self.read_all_observations_from_file()))
     
 #%%
 class ObservationSetManager:

@@ -22,6 +22,7 @@ import AirSimInterface.client as airsim
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 import matplotlib.pyplot as plt
+import subprocess
 from Utils.ImageAnalysis import sensor_reading
 from Utils.AgentObservation import (AgentObservation, AgentObservations, 
                                     _init_observations_file, _update_observations_file,
@@ -50,6 +51,7 @@ from Utils.SimpleGrid import SimpleCoord, SimpleGrid
 
 from Utils.Sensors import RadSensor, AirsimImageSensor
 
+from Communication.CommsAgent import AgentCommunicatorClient, AgentCommunicatorServer
 
 logging.basicConfig(filemode = 'w', level = logging.WARNING)
 root_logger = logging.getLogger('')
@@ -115,6 +117,8 @@ class BaseGridAgent:
         self.prop_battery_cap_used = 0
         self.current_battery_cap = 1
         self.comms_radius = comms_radius
+        self.start_comms_server()
+        self.comms_client = AgentCommunicatorClient()
         self.others_coordinated_this_timestep = []
         #manages observations of this agent and other agents
         self.observation_manager = ObservationSetManager(self.agent_name)
@@ -138,7 +142,11 @@ class BaseGridAgent:
         self.init_state_for_analysis_file(self.agent_state_file_loc)
         self.init_observations_file(self.observations_file_loc)
         
+    def start_comms_server(self):
+        subprocess.run(["python", "./Communication/CommsServer.py", self.agent_name])
         
+    def end_comms_server(self):
+        self.comms_client.shutdown_server(self.agent_name)
         
     def reset(self):
         self.__init__(self.grid, self.__initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
@@ -161,7 +169,6 @@ class BaseGridAgent:
         
     def _read_observations(self, file_loc):
         return read_agent_observations_for_analysis_file(file_loc)
-        
         
     def setup_logs(self):
         '''Sets up logs so that relevant information can be sent to csvs and other log steams'''       
@@ -206,6 +213,18 @@ class BaseGridAgent:
     
     def move_agent(self):
         self.timestep+=1
+        
+    def request_other_agent_observations(self, other_agent_name):
+        '''
+        Requests other agent to send all observations that it has gathered and been sent up to the current point in time
+        '''
+        try:
+            return self.comms_client.get_observations_from(other_agent_name)
+        except Exception as e:
+            #if there are comms problems, return an empty list and log the problem to stdout for now
+            print("Could not communicate with agent {}".format(other_agent_name))
+            print(e)
+            return []
 
         
 class SimpleGridAgent(BaseGridAgent):
