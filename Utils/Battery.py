@@ -115,32 +115,35 @@ class RAVBattery:
         plt.plot([speed for speed in range(40)], [self.predict_capacity_given_speed(speed) for speed in range(40)])
         plt.ylim(0)
             
-    def get_remaining_range(self):
+    def get_remaining_range_at_speed(self, speed):
+        '''Returns how far the RAV is predicted to fly at the given speed'''
         return self.current_range
     
     def get_current_capacity(self):
-        return self.current_range / RAVBattery.maximum_range
+        return self.current_capacity
     
     def set_capacity(self, new_capacity):
-        pass
+        self.current_capacity = new_capacity
     
     def reduce_capacity(self, amount):
-        pass
+        self.current_capacity -= amount
     
     def increase_capacity(self, amount):
-        pass
+        self.current_capacity += amount
     
     def move_by_dist_at_speed(self, dist, speed) -> "True if the agent has enough battery capacity to move the required distance at the required speed, otherwise false":
         if self.current_range - (dist * (RAVBattery.maximum_range/self.predict_capacity_given_speed(speed)))> 0:
             #calculate the proportion of the battery would be used up relative to the maximum capacity travelling the given distance at the given speed
             #then scale up to the maximum range
             self.current_range = self.current_range - (dist * (RAVBattery.maximum_range/self.predict_capacity_given_speed(speed)))
+            self.current_capacity = self.current_range / RAVBattery.maximum_range
             return True
         else:
             #no need to update
             return False
         
     def recharge_to_percentage(self, capacity_percentage) -> "The time taken to recharge the battery to the given percentage":
+        '''Assumes recharge time is a linear with respect to battery capacity '''
         self.current_range = capacity_percentage * RAVBattery.maximum_range 
         return RAVBattery.recharge_time * capacity_percentage
 

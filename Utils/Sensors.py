@@ -5,17 +5,82 @@ Created on Wed Jan 30 14:46:56 2019
 @author: 13383861
 """
 
-import matplotlib.pyplot as plt
-import requests
 import sys
 import random
 import os
+
+import typing
+from abc import ABC, abstractmethod
 sys.path.append('.')
+
+
+import matplotlib.pyplot as plt
+import requests
 
 #import AirSimInterface.client as airsim
 #from AirSimInterface.types import ImageRequest, ImageType, Vector3r
 from Utils.Vector3r import Vector3r
 
+#%%
+class BaseSensor(ABC):
+    '''Base class for all sensor models'''
+    @abstractmethod
+    def _get_reading(self, location):
+        '''Calculates the sensor reading at the location. This can be a probability, a 
+        binary value, etc. depending on the sensor. Should not be publicly exposed'''
+        raise NotImplementedError("Override me in a derived class")
+        
+    def get_reading(self, location):
+        '''Returns the given sensor reading at the location. Used a'''
+        return self._get_reading(location)
+        
+
+
+_binary_sensor_parameters = typing.NamedTuple('binary_sensor_parameters', 
+                                [('false_positive_rate',float),
+                                 ('false_negative_rate', float)])
+    
+class BinarySensorParameters:
+    def __init__(self, false_positive_rate, false_negative_rate):
+        
+        if 0 < false_positive_rate < 0.5:
+            self.false_positive_rate = false_positive_rate
+        elif 0 < false_positive_rate > 1:
+            raise Exception("fpr must be in range 0-1")
+        else:
+            raise Warning("fpr should be in the range 0 - 0.5")
+            
+        if 0 < false_negative_rate < 0.5:
+            self.false_negative_rate = false_negative_rate 
+        elif 0 < false_negative_rate > 1:
+            raise Exception("fpr must be in range 0-1")
+        else:
+            raise Warning("fnr should be in the range 0 - 0.5")
+
+
+class BinarySensor(BaseSensor):
+    '''A base class which returns a 0-1 detection value which represent present or not present'''
+    
+    def get_reading(self, location):
+        reading = self._get_reading(location)
+        if reading not in [0,1]:
+            raise Exception("A binary sensor must reading a binary detection value, {} is invalid".format(reading))
+        else:
+            return reading
+        
+class ProbabilisticSensor(BaseSensor):
+    '''
+    A bass class which enforces that derived classes returns a detection value in the interval [0,1]
+    which represents the detection probability (or confidence) at a given location
+    '''
+    def get_reading(self, location):
+        reading = self._get_reading(location)
+        if not 0 <= reading <= 1:
+            raise Exception("A probabilistic sensor must reading a detection value in the interval [0,1], {} in invalid".format(reading))
+        else:
+            return reading
+    
+#%%
 class RadModel:
     '''Only model count data - if above certain threshold, sensor should return 1. 
     Maybe could add a plume prediction model to this.'''    
@@ -47,8 +112,8 @@ class RadModel:
         ax.plot_trisurf(X, Y, Z)
         plt.savefig(filepath)
         
-        
-class RadSensor:
+#%%
+class RadSensor(BaseSensor):
     
     def __init__(self,rad_model, sensitivity: 'sensitivity is the radius within which sensor would pick up "high" radiation'):
         self.rad_model = rad_model
@@ -109,63 +174,45 @@ class AirsimImageSensor:
                 max_pred = pred['probability']
                 max_pred_details = pred
         return max_pred, max_pred_details
-        
-        
-    def get_probability(self, location):
+    
+    
+    def _get_reading(self, location):
         '''Takes an image at current location and saves it. location is not necessary as a parameter but '''
         #assumes that rav has moved to location
         recorded_image_loc = self._record_Airsim_image()
         max_pred, max_pred_details = self._get_highest_pred(self._get_image_response(recorded_image_loc))
         return max_pred
 
+#%%
 
-class ChungBurdickSingleSourceSensor:
-    '''A sensor which returns the probability of detection at a location, given the knowledge that there is a single source present'''
-    def __init__(self, false_positive_rate, false_negative_rate, source_location):
-        self.false_positive_rate = false_positive_rate
-        self.false_negative_rate = false_negative_rate
-        self.source_location = source_location
-        
-    def get_detection_val(self,location):
-        rand_no = random.random()
-        if location == self.source_location:
-            #0 reading (false negative) generated with probability beta at grid location where source actually lies
-            if rand_no < self.false_negative_rate:
-                return 0
-            else:
-                return 1
-        else:
-            #1 reading (false positive) generated with probability alpha at grid location where source is not actually present
-            if rand_no < self.false_positive_rate:
-                return 1
-            else:
-                return 0
-        
-    def get_probability(self, location):
-#        '''Returns probability of detection'''
-#        detection_val = self.get_detection_val(self.location)
-#        if detection_val == 1:
-#            numerator = (1-self.beta)
-#            denominator = 
-#        
-        return self.get_detection_val(location)    
+#%%
+class FalsePosFalseNegBinarySensor(BinarySensor):
     
-class MultipleSourceSensor:
-    '''A sensor which returns the probability of detection at a location, given the knowledge that there is a single source present'''
-    def __init__(self, false_positive_rate, false_negative_rate, source_locations: list):
+    '''
+    A sensor which returns the probability of detection at a location, given a false positive rate, false negative rate 
+    and whether or not there is a source at the location
+    '''
+    
+    def __init__(self, binary_sensor_parameters: BinarySensorParameters, source_locations):
+        #binary sensor paramters passed in so that it can be shared by multiple objects. 
+        #Also means there is only one place to make sure they are valid
         if not isinstance(source_locations, list):
-            raise Exception("Please provide a list of source_locations")
-        if not all([isinstance(source_location, Vector3r) for source_location in source_locations]):
-            raise Exception("Please provide a list of source_locations instead of {}".format(source_locations[0]))
-        self.false_positive_rate = false_positive_rate
-        self.false_negative_rate = false_negative_rate
-        self.source_locations = source_locations
-        print(source_locations)
+            source_locations = [source_locations]
         
-    def get_detection_val(self,location):
+        #check all source locations in the list are valid vector3r objects
+        for source_location in source_locations:
+            assert isinstance(source_location, Vector3r)
+        
+        self.false_positive_rate = binary_sensor_parameters.false_positive_rate
+        self.false_negative_rate = binary_sensor_parameters.false_negative_rate
+        self.source_locations = source_locations
+            
+    def _get_reading(self,location):    
+        '''
+        Returns a 0 or 1 in accordance with false_positive_rate, false_negative_rate
+        '''
         rand_no = random.random()
         if location in self.source_locations:
-            print("should be postive")
             #0 reading (false negative) generated with probability beta at grid location where source actually lies
             if rand_no < self.false_negative_rate:
                 return 0
@@ -177,16 +224,7 @@ class MultipleSourceSensor:
                 return 1
             else:
                 return 0
-        
-    def get_probability(self, location):
-#        '''Returns probability of detection'''
-#        detection_val = self.get_detection_val(self.location)
-#        if detection_val == 1:
-#            numerator = (1-self.beta)
-#            denominator = 
-#        
-        return self.get_detection_val(location)  
-    
+
 #
 #def get_image_response(image_loc: str):
 #    headers = {'Prediction-Key': "fdc828690c3843fe8dc65e532d506d7e", "Content-type": "application/octet-stream", "Content-Length": "1000"}
@@ -211,21 +249,33 @@ if __name__ == '__main__':
     
     #%%
     import math
-    
+
+#%% test the sensor model    
     #"false alarm rate"
     fpr = 0.2
     #"missed detection rate"
     fnr = 0.25
+    binary_sensor_parameter = BinarySensorParameters(fpr, fnr)
+    try:
+        BinarySensorParameters(2, 3)
+        assert False
+    except Exception as e:
+        assert True
+        
+    try:
+        BinarySensorParameters(fpr, 0.6)
+        assert False
+    except Warning as e:
+        assert True
     
+#%%
     source_location = Vector3r(2,2)
-    cb_sensor = ChungBurdickSingleSourceSensor(fpr, fnr, source_location)
-
+    cb_sensor = FalsePosFalseNegBinarySensor(binary_sensor_parameter, source_location)
     no_samples = 100000
-    
     #check fpr
-    assert math.isclose(sum([cb_sensor.get_probability(Vector3r(0,0)) for i in range(no_samples)]), no_samples*fpr, rel_tol = 0.01)
+    assert math.isclose(sum([cb_sensor.get_reading(Vector3r(0,0)) for i in range(no_samples)]), no_samples*fpr, rel_tol = 0.01)
     #check fnr
-    assert math.isclose(sum([1-cb_sensor.get_probability(source_location) for i in range(no_samples)]), no_samples*(fnr), rel_tol = 0.01)
+    assert math.isclose(sum([1-cb_sensor.get_reading(source_location) for i in range(no_samples)]), no_samples*(fnr), rel_tol = 0.01)
 
 
 

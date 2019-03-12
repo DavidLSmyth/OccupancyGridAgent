@@ -20,7 +20,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection, SaccadicActionSelection
 from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
-from Utils.Sensors import RadModel, RadSensor, ChungBurdickSingleSourceSensor, MultipleSourceSensor
+from Utils.Sensors import RadModel, RadSensor, SingleSourceSensor, MultipleSourceSensor
 from Utils.BeliefMap import BeliefMapComponent, ChungBurdickBeliefMap
 from Utils.Prior import generate_gaussian_prior, save_gaussian_prior, generate_uniform_prior
 from Utils.ProgressBar import progress_bar
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     false_positive_rate = 0.2
     #beta is the "missed detection" rate (or false negative)
     false_negative_rate = 0.12
-    #cb_single_source_sensor = ChungBurdickSingleSourceSensor(false_positive_rate, false_negative_rate, source_location)
+    #cb_single_source_sensor = SingleSourceSensor(false_positive_rate, false_negative_rate, source_location)
 
     cb_single_source_sensor = MultipleSourceSensor(false_positive_rate, false_negative_rate, source_locations)
 

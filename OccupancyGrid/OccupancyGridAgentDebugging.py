@@ -27,7 +27,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection, SaccadicActionSelection
 from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
-from Utils.Sensors import RadModel, RadSensor, ChungBurdickSingleSourceSensor
+from Utils.Sensors import RadModel, RadSensor, SingleSourceSensor
 from Utils.BeliefMap import BeliefMapComponent, ChungBurdickBeliefMap
 from Utils.Prior import generate_gaussian_prior, save_gaussian_prior, generate_uniform_prior
 from Utils.ProgressBar import progress_bar
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     alpha = 0.2
     #beta is the "missed detection" rate (or false negative)
     beta = 0.25
-    cb_single_source_sensor = ChungBurdickSingleSourceSensor(alpha, beta, source_location)
+    cb_single_source_sensor = SingleSourceSensor(alpha, beta, source_location)
 
     #agent_name: str, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], alpha: 'prob of false pos', beta: 'prob of false neg', apply_blur = False):    
     #cb_bel_map = ChungBurdickBeliefMap("agent1", grid, [BeliefMapComponent(prior_i, prior[prior_i]) for prior_i in prior], prior, alpha, beta)

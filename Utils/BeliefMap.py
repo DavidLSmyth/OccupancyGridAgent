@@ -8,6 +8,7 @@ Created on Tue Nov 13 11:40:27 2018
 import sys
 sys.path.append('..')
 import typing
+from abc import abstractmethod
 from scipy.ndimage.filters import gaussian_filter
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,20 +31,13 @@ from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
 #    
 #    return numerator / denominator
 
-def calc_posterior(observation, prior):
-    alpha = 0.2
-    beta = 0.12
+def calc_posterior_from_binary_observation(observation, prior, false_positive_rate, false_negative_rate):
+    '''Given a binary sensor reading, calculates p(x_t = a | observation)'''
     if observation == 1:
-        return(1-beta) * prior /((prior * (1 - beta)) + (1-prior)*(alpha))
+        return(1-false_negative_rate) * prior /((prior * (1 - false_negative_rate)) + (1-prior)*(false_positive_rate))
     else:
-        return(beta) * prior /((prior * (beta)) + (1-prior)*(1-alpha))
-#    numerator = (prior * observation)
-#    denominator = 
-#    if denominator == 0:
-#        #this is a quick and easy solution, should use log odds to solve this properly
-#        denominator = 0.0000000000000001
-#    
-#    return numerator / denominator
+        return(false_negative_rate) * prior /((prior * (false_negative_rate)) + (1-prior)*(1-false_positive_rate))
+
 
 #This calculates the posterior distribution of detection of a source in the grid to be explored, 
 #where there is no independence between grid cells
@@ -180,7 +174,7 @@ class ContinuousBeliefMap:
 #######################  Belief map and tests  #######################
 #A belief map has an agent name (beliefs belong to an agent) consists of belief map components
 #Leave this as namedtuple if don't need to define methods
-class BeliefMap:
+class BaseBeliefMap:
     '''Add method to create a continuous belief map'''
     def __init__(self, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], apply_blur = False):
         '''apply_blur applies a gaussian blue to the belief map on each update to provide a more continuous distribution of belief map values'''
