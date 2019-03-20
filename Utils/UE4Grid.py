@@ -7,10 +7,15 @@ Created on Tue Nov 13 11:03:14 2018
 import sys
 import random
 import itertools
+import typing
+from bisect import bisect_left
 #update path so other modules can be imported
 sys.path.append('..')
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
+
+import matplotlib.pyplot as plt
+from matplotlib import colors
 
 class UE4GridFactory:
     def __init__(self, lng_spacing, lat_spacing, origin, x_lim=None, y_lim=None, no_x=None, no_y=None):
@@ -48,17 +53,24 @@ class UE4GridFactory:
                     self.grid.append(self.origin + Vector3r(x_counter * self.lng_spacing, y_counter * self.lat_spacing))
                 backtrack = not backtrack
             
-    def get_grid_points(self):
+    def get_grid_points(self) -> typing.List[Vector3r]:
+        '''Returns the list of grid points'''
         return self.grid
     
 class UE4Grid:
+    '''
+    Constructor assumes that the grid is initialized with a regular spacing between points. A method is provided to remove points from
+    the grid.
+    '''
     def __init__(self, lng_spacing, lat_spacing, origin, x_lim=None, y_lim=None, no_x=None, no_y=None):
         if not all([x_lim, y_lim]) and not all([no_x, no_y]):
             raise Exception('Either give a limit to the grid or an x and y spacing')
             
         self.origin = origin
         self.grid_factory = UE4GridFactory(lng_spacing, lat_spacing, origin, x_lim, y_lim, no_x, no_y)
-        self.grid_points = self.grid_factory.get_grid_points()
+        
+        #keep grid_points sorted so that updating is easy
+        self.grid_points = sorted(self.grid_factory.get_grid_points(), key =  lambda grid_point: grid_point.x_val + grid_point.y_val * len(self.grid_factory.get_grid_points()))
         
         self.lat_spacing = self.grid_factory.lat_spacing
         self.lng_spacing = self.grid_factory.lng_spacing
@@ -69,6 +81,8 @@ class UE4Grid:
     def get_grid_points(self):
         return self.grid_points
     
+    
+    #if the grid is not regular, these are not properly defined
     def get_lat_spacing(self):
         return self.lat_spacing
     
@@ -82,13 +96,63 @@ class UE4Grid:
         return self.no_y
     
     def get_neighbors(self, grid_loc, radius):
-        '''Gets neighbors of grid_loc within radius.'''
+        '''
+        Gets neighbors of grid_loc within radius. The distance metric is governed by the objects that make up the grid. If a distance_to
+        method is not implmented, this method will fail.
+        '''
         return list(filter(lambda alt_grid_loc: alt_grid_loc.distance_to(grid_loc) <= radius and alt_grid_loc != grid_loc, self.get_grid_points()))
     
     def get_diameter(self):
         '''Returns the maximum distance between any two nodes in the grid'''
         #finds max value of a list of distances from every point to every other point
         return max([loc1.distance_to(loc2) for loc1, loc2 in itertools.permutations(self.grid_points, 2)])
+    
+    def remove_grid_location(self, grid_point: Vector3r) -> bool:
+        '''Removes a grid location from the grid. A grid location that is not already in the grid cannot be removed.
+        Removal is done in-place, grid is updated if True returned, otherwise no modifications if false returned.'''
+        if grid_point not in self.grid_points:
+            return False
+        else:
+            self.grid_points.remove(grid_point)
+            return True
+        
+    def show_geometric_grid(self):
+        max_x, max_y = max(map(lambda grid_point: grid_point.x_val, self.grid_points)), max(map(lambda grid_point: grid_point.y_val, self.grid_points))
+        min_x, min_y = min(map(lambda grid_point: grid_point.x_val, self.grid_points)), min(map(lambda grid_point: grid_point.y_val, self.grid_points))
+        #data = [0 if ]
+        x_vals = list(map(lambda grid_point: grid_point.x_val, self.grid_points))
+        y_vals = list(map(lambda grid_point: grid_point.y_val, self.grid_points))
+        plt.figure()
+        plt.plot(x_vals, y_vals, 'ro')
+        plt.xlim(0 if min_x > 0 else min_x, max_x)
+        plt.ylim(0 if min_y> 0 else min_y, max_y)
+        #fig.set_xticks(self.get_lng_spacing)
+        #fig.set_yticks(self.get_lat_spacing)
+        plt.grid(True)
+        
+        
+    def add_grid_location(self, grid_point: Vector3r) -> bool:
+        if not isinstance(grid_point, Vector3r):
+            raise NotImplementedError("Can only add an object of type Vector3r to the grid")
+        if not grid_point in self.grid_points:
+            #binary search for where to add grid_point
+            #indices recording where to insert
+            insertion_indices= [g_point.x_val + (g_point.y_val * self.get_no_grid_points()) for g_point in self.grid_points]
+            insertion_index = grid_point.x_val + (grid_point.y_val * self.get_no_grid_points())
+            insertion_location = bisect_left(insertion_indices, insertion_index)
+            self.grid_points.insert(insertion_location, grid_point)
+            return True
+        else:
+            return False
+        
+    def get_no_grid_points(self):
+        return len(self.grid_points)
+        
+    def remove_grid_locations(self, grid_locations: typing.List[Vector3r]):
+        '''Removes grid locations if they are present in the grid. Returns a list of booleans
+        representing if the ith grid location was removed'''
+        return [self.remove_grid_location(grid_location) for grid_location in grid_locations]
+            
     
 #%%
 class UE4GridWithSources(UE4Grid):
@@ -120,7 +184,7 @@ class UE4GridWithSources(UE4Grid):
 #%%
     
 if __name__ == "__main__":
-    
+    #%%
     test_grid = UE4Grid(2, 1, Vector3r(0,0), 10, 6)
     
     assert test_grid.get_no_points_x() == 6
@@ -144,9 +208,14 @@ if __name__ == "__main__":
     assert test_grid2.get_diameter() == Vector3r(6,3).distance_to(Vector3r(9,13))
     
     
+    test_grid2.show_geometric_grid()
     
+    test_grid2.remove_grid_location(Vector3r(8,8))
+    test_grid2.remove_grid_location(Vector3r(8,9))
+    print(test_grid2.get_grid_points())
+    test_grid2.show_geometric_grid()
     
-    
-    
-    
+    test_grid2.add_grid_location(Vector3r(11, 13))
+    test_grid2.show_geometric_grid()
+
     

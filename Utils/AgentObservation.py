@@ -5,6 +5,8 @@ Created on Tue Nov 13 11:30:11 2018
 @author: 13383861
 """
 
+#It would be more accurate to describe this in terms of standard agent language, namely percept.
+
 import typing
 import csv
 import sys
@@ -18,7 +20,7 @@ from Utils.UE4Grid import UE4Grid
 
 #an agent precept consists of a grid location, a detection probability, a timestep, a timestamp and the observer name
 _AgentObservationBase = typing.NamedTuple('_AgentObservationBase', [('grid_loc', Vector3r),
-                                                    ('probability', float),
+                                                    ('reading', float),
                                                     ('timestep', int), 
                                                     ('timestamp', float), 
                                                     ('observer_name', str)])
@@ -26,9 +28,9 @@ _AgentObservationBase = typing.NamedTuple('_AgentObservationBase', [('grid_loc',
 #%%
 class AgentObservation(_AgentObservationBase):
     '''A wrapper class of _AgentAnalysisState to enforce correct data types'''
-    def __new__(cls, grid_loc,probability,timestep,timestamp,observer_name) -> '_AgentObservation':
+    def __new__(cls, grid_loc,reading,timestep,timestamp,observer_name) -> '_AgentObservation':
         #does it make sense to just leave args in the constructor and let the return line handle an incorrect number of args
-        args = (grid_loc,probability,timestep,timestamp,observer_name)
+        args = (grid_loc,reading,timestep,timestamp,observer_name)
         #enforce correct data types
         return super(AgentObservation, cls).__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservationBase.__annotations__.values())])
 
@@ -36,7 +38,7 @@ class AgentObservation(_AgentObservationBase):
         if not isinstance(other, self.__class__):
             return False
         else:
-            return all([self.grid_loc == other.grid_loc, self.probability == other.probability, 
+            return all([self.grid_loc == other.grid_loc, self.reading == other.reading, 
                         self.timestep == other.timestep, self.timestamp == other.timestamp, 
                         self.observer_name == other.observer_name])
             #return self.__dict__ == other.__dict__
@@ -44,7 +46,7 @@ class AgentObservation(_AgentObservationBase):
     def __hash__(self):
         # this seems to be broken , might be easier to copy above
         #return hash((self.__dict__.values()))
-        return hash((self.grid_loc, self.probability, 
+        return hash((self.grid_loc, self.reading, 
                         self.timestep, self.timestamp, 
                         self.observer_name))
    
@@ -63,7 +65,7 @@ class BinaryAgentObservation(_AgentObservationBase):
         if not isinstance(other, self.__class__):
             return False
         else:
-            return all([self.grid_loc == other.grid_loc, self.probability == other.probability, 
+            return all([self.grid_loc == other.grid_loc, self.reading == other.reading, 
                         self.timestep == other.timestep, self.timestamp == other.timestamp, 
                         self.observer_name == other.observer_name])        
     def __hash__(self):
@@ -71,7 +73,7 @@ class BinaryAgentObservation(_AgentObservationBase):
     
 #%%
 #Code and test for class which manages agent observations in a set grid
-class AgentObservations():
+class AgentObservations:
     '''A class which records agent observations in a UE4Grid'''
     def __init__(self, grid: UE4Grid):
         self.grid = grid
@@ -168,7 +170,7 @@ if __name__ == "__main__":
 
 #%%
     assert obs1.grid_loc == Vector3r(float(0), float(0))
-    assert obs1.probability == 0.5
+    assert obs1.reading == 0.5
 #%%    
     test_agent_observations.record_agent_observation(obs1)
     test_agent_observations.record_agent_observation(obs2)
