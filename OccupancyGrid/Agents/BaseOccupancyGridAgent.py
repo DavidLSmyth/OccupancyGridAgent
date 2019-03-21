@@ -11,10 +11,12 @@ import os
 import time
 import logging
 import configparser
+import pickle
+import subprocess
 
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
-import subprocess
+
 from Utils.AgentObservation import (_init_observations_file, _update_observations_file,
                                     read_agent_observations_for_analysis_file,
                                     get_agent_observations_file_header)
@@ -128,6 +130,10 @@ class BaseGridAgent:
         
     def init_belief_map(self, single_source):
         pass
+    
+    def pickle_to_file(self, file_loc):
+        with open(file_loc, 'wb') as f:
+            pickle.dump(self, f)
         
     def start_comms_server(self):
         subprocess.run(["python", "./Communication/CommsServer.py", self.agent_name])

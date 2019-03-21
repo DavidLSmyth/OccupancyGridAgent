@@ -312,8 +312,6 @@ class BaseBeliefMap(ABC):
             #print(grid_loc in list(map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components)))
             raise Exception("{} is not in the belief map".format(grid_loc))
             
-    def get_belief_map_components(self):
-        return self.belief_map_components
             
     def save_visualisation(self, filepath):
         '''Saves the visualisation as a png at the specified filepath'''
@@ -406,7 +404,8 @@ class SingleSourceBinaryBeliefMap(BaseBeliefMap):
     '''
     An occupancy grid with single source based on the paper:
     A Decision-Making Framework for Control Strategies in Probabilistic Search. It is just a regular belief
-    map with the update rule specific to a single source.
+    map with the update rule specific to a single source. Observations must be provided as positive or 
+    negative detections at a given grid location.
     '''
     
     def __init__(self, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], alpha: 'prob of false pos', beta: 'prob of false neg', apply_blur = False):
@@ -440,6 +439,8 @@ class SingleSourceBinaryBeliefMap(BaseBeliefMap):
         '''
         Updates a individual component in the belief map given an observation(percept).
         '''
+        if not isinstance(agent_observation, BinaryAgentObservation):
+            raise NotImplementedError("Cannot update a non-binary observation")
         self._update_from_prob_optimized(agent_observation.grid_loc, agent_observation.reading)
         
     def _update_from_prob_optimized(self, observation_grid_loc, reading):
@@ -874,7 +875,7 @@ if __name__ == "__main__":
     import math
     prev_belief = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(0,0), 1)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(0,0), 1, 4, 1238, 'agent1'))
     current_belief = cb_bel_map.get_probability_source_in_grid()
     #numerator = ((1-false_negative_rate) * prior_val) + (false_positive_rate*(prev_bel-prior_val))
     #denominator = ((false_positive_rate * (1-prior_val)) + ((1-false_negative_rate) * (prior_val))) * prev_bel
@@ -885,7 +886,7 @@ if __name__ == "__main__":
     #check holds for another positive reading
     prev_belief = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,4)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(0,4), 1)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(0,4), 1, 4, 1238, 'agent1'))
     current_belief = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_belief/prev_belief, relative_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     assert math.isclose(current_belief-prev_belief, absolute_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
@@ -896,7 +897,7 @@ if __name__ == "__main__":
     #now check given a negative reading, the belief map updates as it should.
     prev_bel = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0), 0, 4, 1238, 'agent1'))
     current_bel = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     print((relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading) - 1) * prev_bel)
@@ -907,7 +908,7 @@ if __name__ == "__main__":
     #check holds for another negative reading
     prev_bel = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0), 0, 4, 1238, 'agent1'))
     current_bel = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     #due to round-off, can only get to within 2%
@@ -949,7 +950,7 @@ if __name__ == "__main__":
     no_updates = 20
     #square grids, size is the side length, number of grid cells is size**2
     start_test_grid_size = 20
-    end_test_grid_size = 80
+    end_test_grid_size = 40
     step_size = 5
     test_grids = [UE4Grid(1, 1, Vector3r(0,0), start_test_grid_size + i*step_size, start_test_grid_size + i*step_size) for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))]
     print("Running with {} test grids".format(len(test_grids)))
@@ -971,7 +972,7 @@ if __name__ == "__main__":
                                                                  {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
             t1 = time.time()
             for i in range(no_updates):
-                bel_map1.update_from_prob(Vector3r(i, i+1), round(random.random()))
+                bel_map1.update_from_observation(Vector3r(i, i+1), round(random.random()))
             t2 = time.time()
             #record the average time per update
             method1_timings.append((t2 - t1)/no_updates)
@@ -1048,7 +1049,7 @@ if __name__ == "__main__":
         print("test {} out of {}".format(test_number, len(test_grids)))
         t1 = time.time()
         for i in range(no_updates):
-            bel_map1.update_from_prob(Vector3r(i, i+1), round(random.random()))
+            bel_map1.update_from_observation(BinaryAgentObservation(Vector3r(i, i+1), round(random.random()), 4, 123, 'agent1'))
         t2 = time.time()
         #record the average time per update
         timings.append((t2 - t1)/no_updates)
@@ -1072,9 +1073,30 @@ if __name__ == "__main__":
     plt.xlabel("Number of grid cells")
     plt.legend()
 
+
+#%%
+    t1 = time.time()
+    times = [time.time()]
+    for grid_loc in bel_map1.get_grid().get_grid_points():
+        bel_map1.get_belief_map_component(grid_loc)
+        times.append(time.time())
+    #%%
+    times = [time - times[0] for time in times]
+    times = [times[i] - times[i-1] for i in range(1,len(times)-1)]
+    #analyse binary search for retrieving a grid location
+    plt.plot(times)
+    print("average lookup time for individual belief map component: {} seconds".format(sum(times)/len(times)))
+    sample_variance = (sum([t**2 for t in times]) - ((sum(times)**2)/len(times)))/(len(times) - 1)
+    print("variance in lookup time for individual belief map component: {} seconds".format(sample_variance))
     #%%
     #test the pickle methods
-    bel_map1.
+    pickle_file_loc = "D:/OccupancyGrid/PickledObjects/test_pickle.bin"
+    bel_map1.pickle_to_file(pickle_file_loc)
+    #%%
+    with open(pickle_file_loc, 'rb') as f:
+        bel_map_pickled = pickle.load(f)
+        for grid_loc in bel_map1.get_grid().get_grid_points():
+            assert bel_map_pickled.get_belief_map_component(grid_loc) == bel_map1.get_belief_map_component(grid_loc) 
         
         
         
