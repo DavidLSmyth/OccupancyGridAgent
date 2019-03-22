@@ -144,9 +144,10 @@ def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_p
 
 #%%
 #A belief map component consists of a grid location and a likelihood
-_BeliefMapComponent = typing.NamedTuple('belief_map_component', 
-                                [('grid_loc',Vector3r),
-                                 ('likelihood', float)])
+#this is deprecated because namedtuples are immutable - when updating the belief map, want mutable components
+#_BeliefMapComponent = typing.NamedTuple('belief_map_component', 
+#                                [('grid_loc',Vector3r),
+#                                 ('likelihood', float)])
 #%%
 class _BeliefMapComponent(RecordClass):
     grid_loc: Vector3r

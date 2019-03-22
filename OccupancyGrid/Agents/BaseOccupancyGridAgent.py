@@ -13,13 +13,15 @@ import logging
 import configparser
 import pickle
 import subprocess
+import typing
+from abc import ABC, abstractmethod
 
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 
 from Utils.AgentObservation import (_init_observations_file, _update_observations_file,
                                     read_agent_observations_for_analysis_file,
-                                    get_agent_observations_file_header)
+                                    get_agent_observations_file_header, AgentObservation)
 
 from Utils.ObservationSetManager import ObservationSetManager
 
@@ -53,8 +55,11 @@ cmd_line_formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s 
 
 class BaseGridAgent:
     
-    '''Base class for all agents that use a grid representation of the environment, contains minimal functionality. Designed with goal main in mind
-    to be able to compare and measure agent performance in a consistent way'''
+    '''
+    Base class for all agents that use a grid representation of the environment, 
+    contains minimal functionality. Designed with goal main in mind
+    to be able to compare and measure agent performance in a consistent way
+    '''
     
     #ImageDir = 'D:/ReinforcementLearning/DetectSourceAgent/Data/SensorData'
     #stores analysis csvs. Each csv contains agent state at each timestep
@@ -63,7 +68,7 @@ class BaseGridAgent:
     #ObservationDir = "D:/ReinforcementLearning/DetectSourceAgent/Observations"
     #MockedImageDir = 'D:/ReinforcementLearning/DetectSource/Data/MockData'
     
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None, battery = None, battery_recharge_locations: typing.List[Vector3r] = []):
         
         #configures the directory conventions for storing data
         self.configure_file_conventions()
@@ -81,6 +86,8 @@ class BaseGridAgent:
         
         self.current_pos_intended = initial_pos
         self.current_pos_measured = initial_pos
+        
+        #valid grid locations to explore
         self.grid_locs = grid.get_grid_points()
         
         #initialise explored grid locations as empty
@@ -94,15 +101,15 @@ class BaseGridAgent:
         self.other_active_agents = other_active_agents
         self.total_dist_travelled = 0
         self.distance_covered_this_timestep = 0
-        self.prop_battery_cap_used = 0
-        self.current_battery_cap = 1
         self.comms_radius = comms_radius
         self.start_comms_server()
         self.comms_client = AgentCommunicatorClient()
         self.others_coordinated_this_timestep = []
         #manages observations of this agent and other agents
         self.observation_manager = ObservationSetManager(self.agent_name)
-        self.sensor = sensor
+        
+        #maybe should include possibility of multiple sensors?
+        self.sensors = sensors
         if self._logged:
             self.setup_logs()
 
@@ -119,8 +126,9 @@ class BaseGridAgent:
         self.agent_state_file_loc = self.directories_mapping['AgentStateDir'] + "/{}.csv".format(self.agent_name)
         self.observations_file_loc = self.directories_mapping['ObservationDir'] + "/{}.csv".format(self.agent_name)
         
-        self.init_state_for_analysis_file(self.agent_state_file_loc)
+        #self.init_state_for_analysis_file(self.agent_state_file_loc)
         self.init_observations_file(self.observations_file_loc)
+        self.battery = battery
         
     def configure_file_conventions(self):
         config_loc = './OccupancyGrid/Agents/BaseOccupancyGridAgentconfig.ini'
@@ -142,7 +150,9 @@ class BaseGridAgent:
         self.comms_client.shutdown_server(self.agent_name)
         
     def reset(self):
-        self.__init__(self.grid, self.__initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
+        '''Resets the agent to its initial state'''
+        self.battery.reset()
+        self.__init__(self.grid, self.__initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate, self.battery)
         
     def log_msg_to_cmd(self, msg, level, log_name, should_log = True):
         if should_log:
@@ -190,21 +200,63 @@ class BaseGridAgent:
     def get_agent_name(self):
         return self.agent_name
 
-    def get_sensor_reading(self):
+    @abstractmethod
+    def _get_sensor_readings(self) -> typing.List[AgentObservation]:
+        '''Returns the readings of the agents sensors at it's current location. Sensor readings 
+        are currently returned as agent observations, which describe the reading, location, timestep, 
+        timestamp, location.'''
         #get sensor probability at current position
         #print(self.current_pos_measured)
-        return self.sensor.get_probability(self.current_pos_measured)
+        #return self.sensor.get_probability(self.current_pos_measured)
+        pass
     
     def actuate(self):
-        pass
-    
+        '''
+        Select an action to take and then execute that action in the environment
+        '''
+        self.increment_timestep()
+        #for now action can be to move the agent to a grid location, or to recharge the battery
+        action = self._select_action()
+        if isinstance(action, Vector3r):
+            self._move_agent(action)
+#        otherwise if the action is to recharge the agent's battery, do so.
+        elif isinstance(action, ):
+#            maybe should give the agent the option to navigate to recharge point and then recharge?
+#            maybe another option should be to keep recharging at the current timestep?             
+#            self.battery.recharge_to_percentage()
+#        #attempts to recharge the battery to a percentage
+        
+        
     def perceive(self):
+        '''
+        Use on-board sensors to percieve the environment and store the perceptions for use in future computations regarding
+        which actions to take
+        '''
         pass
     
-    def get_state(self):
+    @abstractmethod
+    def get_belief(self):
+        '''
+        Gets the belief of the agent at the current time step
+        '''
         pass
     
-    def move_agent(self):
+    @abstractmethod
+    def _move_agent(self, new_location):
+        '''
+        Responsible for actually sending commands to actuators to move the agent.
+        '''
+        pass
+    
+    @abstractmethod
+    def _select_action(self):
+        '''
+        A method that represent agent 'deliberation' over which action should be executed at the next timestep. Actions for now
+        are simply assumed to be a new grid location to move to, and whether to recharge the battery or not.
+        '''
+        pass
+        
+    def increment_timestep(self):
         self.timestep+=1
         
     def request_other_agent_observations(self, other_agent_name):
@@ -226,7 +278,7 @@ if __name__ == "__main__":
     grid = UE4Grid(15, 20, Vector3r(0,0), 60, 45)
     #grid, move_from_bel_map_callable, height, epsilon, multirotor_client, agent_name, performance_csv_path: "file path that agent can write performance to", prior = []
     #grid, initial_pos, move_from_bel_map_callable, height, epsilon, multirotor_client, agent_name, prior = {}
-    occupancy_grid_agent = OccupancyGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.2, MockRavForTesting(), 'agent1')
+    occupancy_grid_agent = BaseGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.2, MockRavForTesting(), 'agent1')
     #write some tests for agent here
     occupancy_grid_agent.current_pos_intended = Vector3r(0,0)
     occupancy_grid_agent.current_pos_measured = None
@@ -238,8 +290,8 @@ if __name__ == "__main__":
     dont_move = lambda belief_map, current_grid_loc, epsilon:  Vector3r(15,20)
     print(grid.get_grid_points())
     ###Check that agents can communicate with each other
-    occupancy_grid_agent1 = OccupancyGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.2, MockRavForTesting(), 'agent1', ['agent2'])
-    occupancy_grid_agent2 = OccupancyGridAgent(grid, Vector3r(15,20), dont_move, -12, 0.2, MockRavForTesting(), 'agent2', ['agent1'])
+    occupancy_grid_agent1 = BaseGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.2, MockRavForTesting(), 'agent1', ['agent2'])
+    occupancy_grid_agent2 = BaseGridAgent(grid, Vector3r(15,20), dont_move, -12, 0.2, MockRavForTesting(), 'agent2', ['agent1'])
     
     print(occupancy_grid_agent2.can_coord_with_other(occupancy_grid_agent1.agent_name, 10))
     occupancy_grid_agent1.explore_timestep()

@@ -5,9 +5,17 @@ Created on Mon Mar 11 16:08:00 2019
 @author: 13383861
 """
 
+import time
 import typing
+import asyncio
+import threading
+from enum import Enum
+
 from scipy.interpolate import splrep, splev
 import matplotlib.pyplot as plt
+
+from Utils import Vector3r
+
 #%%
 
 #################### Interpolated Battery Model ####################
@@ -101,7 +109,8 @@ class RAVBattery:
     maximum_range = 3000
     
     #recharge time from 0% - 100% in seconds (20 minutes)
-    recharge_time = 60*20
+    #recharge_time = 60*20
+    recharge_time = 6
     
     def __init__(self, intial_capacity_percentage):
         self.effective_capacities = [flight_time / max(RAVBattery.flight_times) for flight_time in RAVBattery.flight_times]
@@ -110,6 +119,15 @@ class RAVBattery:
         self.current_range = intial_capacity_percentage * RAVBattery.maximum_range 
         self.effective_capacity_given_speed_spline = splrep(RAVBattery.speeds_ranges, sorted(self.effective_flight_ranges.values(), reverse = True))
         self.predict_capacity_given_speed = lambda speed: splev(speed, self.effective_capacity_given_speed_spline)
+        self.initial_capacity = intial_capacity_percentage
+        self._is_recharging = False
+        self.__charging_start_time = None
+        self.__current_recharge_time = None
+        
+    def poll(self):
+        '''A poll method updates the current state of the battery - whether it is recharging or not. This should ideally be called at each timestep 
+        while the agent is in operation'''
+        self.is_recharging()
         
     def plot_effective_range_vs_speed(self):
         plt.plot([speed for speed in range(40)], [self.predict_capacity_given_speed(speed) for speed in range(40)])
@@ -117,7 +135,7 @@ class RAVBattery:
             
     def get_remaining_range_at_speed(self, speed):
         '''Returns how far the RAV is predicted to fly at the given speed'''
-        return self.current_range
+        return self.predict_capacity_given_speed(speed) #* self.current_range
     
     def get_current_capacity(self):
         return self.current_capacity
@@ -142,43 +160,197 @@ class RAVBattery:
             #no need to update
             return False
         
+    def _recharge_for_n_seconds(self, number_of_seconds):
+        self._is_recharging = True
+        #sets the amount of time the battery needs to recharge
+        self.__current_recharge_time = number_of_seconds
+        #records when the battery has begun to start recharging
+        self.__charging_start_time = time.time()
+        
+    def _stop_recharging(self):
+        self._is_recharging = False
+        
+    def is_recharging(self):
+        is_recharging = (time.time() - self.__charging_start_time) < self.__current_recharge_time
+        
+        if self._is_recharging and not is_recharging:
+            #this means that the battery is meant to be recharging but time has elapsed since it started recharging
+            self._stop_recharging()
+            self.current_capacity = self._desired_capacity
+            self._desired_capacity = None
+            
+        if not is_recharging:
+            self._stop_recharging()
+        else:
+            #update the battery's current capacity 
+            #the proportion of time the battery has spent charging until it reaches desired capacity is:
+            (time.time() - self.__charging_start_time)/self.__current_recharge_time
+            self.current_capacity = self._initial_recharge_capacity + ((self._desired_capacity - self._initial_recharge_capacity) *  ((time.time() - self.__charging_start_time)/self.__current_recharge_time))
+            self.current_range = self.current_capacity * RAVBattery.maximum_range
+        return is_recharging
+        
     def recharge_to_percentage(self, capacity_percentage) -> "The time taken to recharge the battery to the given percentage":
-        '''Assumes recharge time is a linear with respect to battery capacity '''
-        self.current_range = capacity_percentage * RAVBattery.maximum_range 
+        '''Assumes recharge time is a linear with respect to battery capacity. If the battery is already recharging, return
+        None and let it continue recharging. It is possible to cancel the recharging and then start it again.'''
+        if self._is_recharging:
+            return None
+        #if the battery is already above this percentage, can't recharge to it
+        if self.current_capacity > capacity_percentage:
+            #0 seconds to recharge to a capacity less than the current capacity
+            return 0
+        self._is_recharging = True
+        self._initial_recharge_capacity = self.current_capacity
+        self._desired_capacity = capacity_percentage
+        #self.current_capacity = capacity_percentage
+        recharge_time = RAVBattery.recharge_time * capacity_percentage
+        #don't return until the battery has recharged
+        self._recharge_for_n_seconds(recharge_time)
         return RAVBattery.recharge_time * capacity_percentage
+    
+    def cancel_recharging(self):
+        self.poll()
+        self._is_recharging = False
+        self.__current_recharge_time = 0
+        self.poll()
+        
+    
+    def reset(self):
+        '''Resets the RAV battery to its initial state'''
+        self.__init__(self.initial_capacity)
 
+
+class RAVBatteryAgent:
+    '''
+    A class that manages a physical RAV's battery model.
+    '''
+    
+    def __init__(self, initial_battery_percentage, initial_location: Vector3r):
+        self.battery = RAVBattery(initial_battery_percentage)
+        self.current_location = initial_location
+        
+    def can_move_to_location(self, target_location: Vector3r, current_location: Vector3r, speed: float):
+        '''Returns boolean whether or not agent can move to the desired location at the desired speed with it's remaining battery capacity'''
+        return self.battery.get_remaining_range_at_speed() > target_location.distance_to(current_location)
+        
+    def get_nearest_feasible_location(self, target_location: Vector3r, current_location: Vector3r, speed: float):
+        '''Returns the nearest feasible location to move to given a desired target location'''
+        if self.battery.current_capacity == 0:
+            return self.current_location
+        if not self.can_move_to_location(target_location, current_location, speed):
+            #send the agent to the point nearest the target location and let it die!
+            slope = (target_location.y_val - current_location.y_val) / (target_location.x_val - current_location.x_val) 
+            slope_squared = slope **2
+            nearest_point_y = (((self.battery.get_remaining_range_at_speed(speed)**2) * (slope_squared)) / (slope_squared + 1))**0.5
+            nearest_point_x = nearest_point_y/slope
+            target_location = Vector3r(current_location.x_val + nearest_point_x, current_location.y_val + nearest_point_y, current_location.z_val)
+        #self.battery.move_by_dist_at_speed(target_location.distance_to(current_location), speed)
+        return target_location
+    
+    def move_to_location(self, target_location: Vector3r, current_location: Vector3r, speed: float):
+        '''
+        Given the order to move to a location, returns the closest location to the target which the agent can reach
+        from it's current location and updates the battery accordingly. If the battery is busy recharging, returns
+        None.
+        '''
+        if self.battery.is_recharging():
+            return None
+        nearest_feasible_location = self.get_nearest_feasible_location(target_location, current_location, speed)
+        self.battery.poll()
+        self.battery.move_by_dist_at_speed(nearest_feasible_location, speed)
+        self.current_location = nearest_feasible_location
+    
+    def recharge_to_percentage(self, capacity_percentage):
+        self.battery.poll()
+        self.battery.recharge_to_percentage(capacity_percentage)
+        
+    def battery_is_recharging(self):
+        self.battery.poll()
+        return self.battery.is_recharging()
+    
+    def cancel_battery_recharging(self):
+        self.battery.cancel_recharging()
+            
+            
 #%%
 
 if __name__ == '__main__':
-#%%    
+    
+#%% 
+    import math
     #set initial capacity as full
     test_battery = RAVBattery(1)
     test_battery.move_by_dist_at_speed(200, 5)
     print(test_battery.get_current_capacity())
-    print(test_battery.get_remaining_range())
+    print(test_battery.get_remaining_range_at_speed(5))
+    print(test_battery.get_remaining_range_at_speed(8))
 #%%
     print(test_battery.move_by_dist_at_speed(200, 12))
     print(test_battery.get_current_capacity())
-    print(test_battery.get_remaining_range())
+    print(test_battery.get_remaining_range_at_speed(6))
     test_battery.plot_effective_range_vs_speed()
 #%%        
     test_battery.move_by_dist_at_speed(2000, 30)
     print(test_battery.get_current_capacity())
-    print(test_battery.get_remaining_range())
+    print(test_battery.get_remaining_range_at_speed(2))
     
     print(test_battery.move_by_dist_at_speed(280, 30))
+#%%    
+    print(test_battery.get_current_capacity())
+    seconds_to_recharged = test_battery.recharge_to_percentage(0.9)
+    print("number of seconds until battery is recharged: ", seconds_to_recharged)
+    assert test_battery.is_recharging()
+    time.sleep(seconds_to_recharged/2)
+    assert test_battery.is_recharging()
+    time.sleep(seconds_to_recharged/2)
+    test_battery.poll()
+    assert not test_battery.is_recharging()
+    assert test_battery.get_current_capacity() == 0.9
+    
+#%%
+    print(test_battery.get_current_capacity())
+    test_battery.move_by_dist_at_speed(500, 35)
+    current_cap = test_battery.get_current_capacity()
+    print(current_cap)
+    seconds_to_recharged = test_battery.recharge_to_percentage(0.95)
+    print("number of seconds until battery is recharged: ", seconds_to_recharged)
+    assert test_battery.is_recharging()
+    time.sleep(seconds_to_recharged)
+
+    test_battery.cancel_recharging()
+    assert not test_battery.is_recharging()
+    assert math.isclose(test_battery.get_current_capacity(), 0.95, rel_tol = 0.01)
+
+#%%
+    #test that charging for half time it would take to charge to desired capacity results in adding half capacity that
+    #would have needed to be added to charge to desired capacity
+    print(test_battery.get_current_capacity())
+    test_battery.move_by_dist_at_speed(500, 35)
+    current_cap = test_battery.get_current_capacity()
+    print(current_cap)
+    seconds_to_recharged = test_battery.recharge_to_percentage(0.95)
+    print("number of seconds until battery is recharged: ", seconds_to_recharged)
+    assert test_battery.is_recharging()
+    time.sleep(seconds_to_recharged/2)
+    test_battery.cancel_recharging()
+    assert not test_battery.is_recharging()
+    assert math.isclose(test_battery.get_current_capacity(), current_cap + (0.95 - current_cap)/2, rel_tol = 0.01)
+
+#%%    
+   
+    import math
+    assert math.isclose(test_battery.get_current_capacity(), current_cap + (0.95 - current_cap)/2, rel_tol = 0.01)
+    test_battery.recharge_to_percentage(0.95)
+    test_battery.poll()
+    assert test_battery.get_current_capacity() == 0/95
+    
+    #%%
+    assert test_battery.get_current_capacity() == 0.9  
+    assert test_battery.get_remaining_range_at_speed(6) > test_battery.get_remaining_range_at_speed(9) > test_battery.get_remaining_range_at_speed(12)
     
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    #%%
+    bat_agent = RAVBatteryAgent(1, Vector3r(0,0))
+    bat_agent.can_move_to_location()
     
     
     

@@ -21,7 +21,17 @@ In ROCSAFE, POST requests will be sent for the most recent sensor reading. This 
 
 #%%
 class AgentCommunicatorServer:
-    '''A simple class which acts as a server for other agents wanting to communicate with this agent'''
+    '''
+    A simple class which acts as a server for other agents wanting to communicate with this agent.
+    To start the server, run this python file from the top level directory in this repo (important for file paths)
+    To request the observations from the current agent up to a given timestep:
+    - The port to connect to is 8000 + agent number. E.g. if your agent is named agent3, it would be 8003.
+    - Send a GET request to localhost:port_number/get_observations/<agent_name/<timestep>
+    - By convention, the agent will read its observations from Observations/agent_name.csv
+    
+    To request server shutdown:
+    - send a GET request to localhost/port_number/shutdown
+    '''
     
     no_communicators = 0
     base_port = 8000

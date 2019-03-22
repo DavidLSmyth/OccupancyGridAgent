@@ -14,17 +14,26 @@ import sys
 sys.path.append('..')
 sys.path.append('.')
 
+from recordclass import RecordClass
+
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 
 #an agent precept consists of a grid location, a detection probability, a timestep, a timestamp and the observer name
-_AgentObservationBase = typing.NamedTuple('_AgentObservationBase', [('grid_loc', Vector3r),
-                                                    ('reading', float),
-                                                    ('timestep', int), 
-                                                    ('timestamp', float), 
-                                                    ('observer_name', str)])
+#this is deprecated, agent observations should be mutable so recordclass is used instead
+#_AgentObservationBase = typing.NamedTuple('_AgentObservationBase', [('grid_loc', Vector3r),
+#                                                    ('reading', float),
+#                                                    ('timestep', int), 
+#                                                    ('timestamp', float), 
+#                                                    ('observer_name', str)])
 
+class _AgentObservationBase (RecordClass):
+    grid_loc: Vector3r
+    reading: float
+    timestep: int 
+    timestamp: float 
+    observer_name: str
 #%%
 class AgentObservation(_AgentObservationBase):
     '''A wrapper class of _AgentAnalysisState to enforce correct data types'''
