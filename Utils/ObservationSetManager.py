@@ -14,9 +14,10 @@ from Utils.AgentObservation import AgentObservation
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
-from Utils.BeliefMap import (create_belief_map, create_belief_map_from_observations,
- create_single_source_belief_map_from_observations, create_confidence_interval_map_from_observations)
+from Utils.BeliefMap import (create_single_source_belief_map, create_multiple_source_belief_map,
+ create_confidence_interval_belief_map)
 
+#%%
 class AgentObservationFileReader:
     def __init__(self, agent_name, file_path = None):
         if not file_path:

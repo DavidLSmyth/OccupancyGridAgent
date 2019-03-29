@@ -8,6 +8,7 @@ Created on Tue Nov 13 11:40:27 2018
 import sys
 sys.path.append('..')
 import typing
+import math
 from recordclass import RecordClass
 from abc import abstractmethod, ABC
 import pickle
@@ -15,6 +16,7 @@ from scipy.ndimage.filters import gaussian_filter
 import numpy as np
 import matplotlib.pyplot as plt
 from bisect import bisect_left
+import numba
 
 from Utils.UE4Grid import UE4Grid
 #from AirSimInterface.types import Vector3r
@@ -69,7 +71,24 @@ def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: floa
             numerator = (1-alpha) * prior
     return numerator/denominator
 
-def _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha, beta):
+
+def calculate_binary_sensor_probability(reading_value, reading_location, agent_location, fpr, fnr):
+    '''Calculates p(current reading | current state), where state is made up of the agents location'''
+    if reading_location == agent_location:
+        if reading_value == 1:
+            return 1 - fnr
+        else:
+            return fnr
+    else:
+        if reading_value == 1:
+            return fpr
+        else:
+            return 1-fpr
+        
+def calculate_normalizing_constant():
+    pass
+
+def _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, fpr, fnr):
     '''
     Given a binary sensor model (sensor either returns detected or not detected) which outlines the probability of detecting false positives/false negatives, 
     calculates the posterior probability of observing the value that you did.
@@ -78,33 +97,36 @@ def _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior: float, 
         raise NotImplementedError("This model is only suitable for a binary sensor reading")
     grid_cell_location_condition = observation_cell_loc != update_cell_loc
     observation_reading_condition = observation_value == 1
-    numerator = grid_cell_to_update_prior
+    numerator = grid_cell_to_update_prior * calculate_binary_sensor_probability(observation_value, observation_cell_loc, update_cell_loc, fpr, fnr)
     #ordered by most likely to least likely
     if observation_value == 0 and grid_cell_location_condition:
-        numerator = (1 - alpha) * numerator
-        denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((beta) * observation_grid_loc_prior)
+        #numerator = (1 - alpha) * numerator
+        denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((fnr) * observation_grid_loc_prior)
         
     elif observation_value == 1 and grid_cell_location_condition:
-            numerator = (alpha) * numerator
-            denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
+            #numerator = (alpha) * numerator
+            denominator = ((fpr) * (1 - observation_grid_loc_prior)) + ((1 - fnr) * observation_grid_loc_prior)    
             
     elif observation_value == 1 and not grid_cell_location_condition:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = (1 - beta) * numerator
-        denominator = ((alpha) * (1-observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)
+        #numerator = (1 - beta) * numerator
+        denominator = ((fpr) * (1-observation_grid_loc_prior)) + ((1 - fnr) * observation_grid_loc_prior)
         
     elif observation_value == 0 and not grid_cell_location_condition:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = beta * numerator
-        denominator = ((1 - alpha) * (1-observation_grid_loc_prior)) + (beta * observation_grid_loc_prior)
+        #numerator = beta * numerator
+        denominator = ((1 - fpr) * (1-observation_grid_loc_prior)) + (fnr * observation_grid_loc_prior)
         
     else:
         raise Exception("Cannot calculate posterior when sensor readings are not 0 or 1. You provided value {}".format(observation_value))
         
     return numerator / denominator
 
+    
+    
+    
 #wrapper method for above given an agent observation rather than a probability and recorded grid location
-def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, reading: float, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha: float, beta: float):
+def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, reading: float, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, fpr: float, fnr: float):
     '''
     As outlined in A Decision-Making Framework for Control Strategies in Probabilistic Search, all grid cell probabilities are updated 
     whenever an observation is made in any grid cell. This function returns the posterior probability of the source being present in a 
@@ -112,7 +134,7 @@ def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_p
     '''
     if not reading in [0,1]:
         raise NotImplementedError("Please provide an agent observation of the type BinaryAgentObservation")
-    return _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior, grid_cell_to_update_prior, reading, observation_cell_loc, update_cell_loc, alpha, beta)
+    return _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior, grid_cell_to_update_prior, reading, observation_cell_loc, update_cell_loc, fpr, fnr)
 #
 #def calc_single_source_posterior_given_sensor_sensitivity(belief_map, observation):
 #    if not isinstance(observation, BinaryAgentObservation):
@@ -651,6 +673,154 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
     return_bel_map.update_from_observations(agent_observations)
     return return_bel_map
 
+#%%
+
+import numpy as np
+
+from numba import jitclass
+from numba import int32, float32, float64, double
+spec= [
+       ('estimated_state', double[::]),
+       ('identity', int32[:]),
+       ('fpr_matrix', float32[:]),
+       ('fnr_matrix', float32[:]),
+       ('fpr_matrix', float32[:]),
+       ('b0', float32[:]),
+       ('a0', float32[:]),
+       ('b1', float32[:]),
+       ('a1', float32[:]),
+       ('fpr', float32),
+       ('fnr', float32)
+       ]
+
+#%%
+    
+#@numba.jit(nopython = True)
+def _get_next_estimated_state_function_pos_reading(matrix_size, a1, b1):
+    #location_matrix = np.zeros((matrix_size, matrix_size))
+    @numba.jit(nopython = True, parallel = True)
+    def _get_next_estimated_state(location_index, previous_estimated_state):
+        location_matrix = np.zeros((matrix_size, matrix_size))
+        location_matrix[location_index,location_index] = 1
+        return previous_estimated_state *(location_matrix * b1 + (np.identity(matrix_size) - location_matrix)*a1)
+    return _get_next_estimated_state
+    
+#@numba.jit(nopython = True)
+def _get_next_estimated_state_function_neg_reading(matrix_size, a0, b0):
+    #location_matrix = np.zeros((matrix_size, matrix_size))
+    @numba.jit(nopython = True, parallel = True)
+    def _get_next_estimated_state(location_index, previous_estimated_state):
+        location_matrix = np.zeros((matrix_size, matrix_size))
+        location_matrix[location_index,location_index] = 1
+        next_estimated_state = previous_estimated_state *(location_matrix * b0 + (np.identity(matrix_size) - location_matrix)*a0)
+        return next_estimated_state/next_estimated_state.trace()
+    return _get_next_estimated_state
+
+#@numba.jit(nopython = True)
+def gen_next_estimated_state_functions(state_size, a1, b1, a0, b0):    
+    pos = _get_next_estimated_state_function_pos_reading(state_size, a1, b1)
+    neg = _get_next_estimated_state_function_pos_reading(state_size, a0, b0)
+    return pos, neg
+
+#@numba.jit(nopython = True)
+def get_next_estimated_state(location_index, reading, previous_estimated_state, update_fns):
+    if reading == 1:
+        update_fn = update_fns[0]
+    else:
+        update_fn = update_fns[1]
+    next_state=update_fn(location_index, previous_estimated_state)
+    return next_state/next_state.trace()
+
+#%%
+fpr = 0.1
+fnr = 0.2
+test_grid = UE4Grid(1,1,Vector3r(0.0), 20, 20)
+
+initial_state = [0.008 for i in range(len(test_grid.get_grid_points()))]
+initial_state.append(1-sum(initial_state))
+initial_state = initial_state * np.identity(len(initial_state))
+fpr_matrix = fpr * np.identity(len(initial_state))
+fnr_matrix = fnr * np.identity(len(initial_state))
+identity = np.identity(len(initial_state))    
+b0 = fnr_matrix
+a0 = identity - fpr_matrix
+    
+b1 = identity - fnr_matrix
+a1 = fpr_matrix
+import time
+update_fns = gen_next_estimated_state_functions(initial_state.shape[0], a1, b1, a0, b0)
+#%%
+t1 = time.time()
+next_state = get_next_estimated_state(8, 0, initial_state, update_fns)
+t2 = time.time()
+print(t2 - t1)
+
+#%%
+class BeliefMatrix:
+    '''Belief can be described by a matrix. Updates are performed as matrix addition and 
+    multiplication'''
+    def __init__(self, valid_locations, initial_state, fpr, fnr):
+        self.fpr = fpr
+        self.fnr = fnr
+        self.locations = valid_locations
+        self._setup_matrices(initial_state)
+        #by convention state "0" which represents none of the grid cells containing the source
+        #is the last element on the diagonal
+        #self.locations = locations
+#        self.estimated_state = np.identity(len(initial_state))*initial_state
+#        self.identity = np.identity(len(initial_state))
+#        self.fpr_matrix = fpr * np.identity(len(initial_state))
+#        self.fnr_matrix = fnr * np.identity(len(initial_state))
+#        
+#        self.b0 = self.fnr_matrix
+#        self.a0 = self.identity - self.fpr_matrix
+#        
+#        self.b1 = self.identity - self.fnr_matrix
+#        self.a1 = self.fpr_matrix
+        #self._setup_matrices(initial_state)
+        #self.estimated_state.diagonal = np.array(initial_states)
+        
+        #assert math.isclose(self.estimated_state.trace(), 1, rel_tol = 0.000001), self.estimated_state.trace()
+        #set the diagonal of the current estimated state
+        
+
+    def _setup_matrices(self, initial_state):
+        '''Code to setup matrices separated out'''
+        self.estimated_state = np.identity(len(initial_state))*initial_state
+        self.identity = np.identity(len(initial_state))
+        self.fpr_matrix = fpr * np.identity(len(initial_state))
+        self.fnr_matrix = fnr * np.identity(len(initial_state))
+        
+        self.b0 = self.fnr_matrix
+        self.a0 = self.identity - self.fpr_matrix
+        
+        self.b1 = self.identity - self.fnr_matrix
+        self.a1 = self.fpr_matrix
+        self.matrix_size = len(initial_state)
+        self.update_fns = gen_next_estimated_state_functions(self.matrix_size, self.a1, self.b1, self.a0, self.b0)
+    
+    def assert_well_defined(self):
+        '''checks that trace of estimated state is 1'''
+        assert math.isclose(self.estimated_state.trace(), 1, rel_tol = 0.000001), self.estimated_state.trace()
+    
+    def normalize(self):
+        self.estimated_state = self.estimated_state/self.estimated_state.trace()
+        
+    def _update_calculation(self, location_index, reading):
+        self.estimated_state = get_next_estimated_state(location_index, reading, self.estimated_state)
+        
+    def get_location_index(self,location):
+        return self.locations.index(location)
+    
+    def update(self, location, reading):
+        location_index = self.get_location_index(location)
+#        print("calling _update_calculation with values", location_index, reading)
+        self._update_calculation(location_index, reading)        
+        self.normalize()
+        
+
+    def get_prob_in_grid(self):
+        return self.estimated_state.trace() - self.estimated_state[self.estimated_state.shape[0]-1,self.estimated_state.shape[0]-1]
 
 #%%
 if __name__ == "__main__":
@@ -667,6 +837,13 @@ if __name__ == "__main__":
 #            args = (grid_loc,likelihood)
 #            return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _BeliefMapComponent.__annotations__.values())])
 
+    #%%
+    test_grid = UE4Grid(1,1,Vector3r(0.0), 100, 100)
+    initial_state = [0.00008 for i in range(len(test_grid.get_grid_points()))]
+    initial_state.append(1-sum(initial_state))
+    print(sum(initial_state))
+    test_bel_matrix = BeliefMatrix(test_grid.get_grid_points(),np.array(initial_state, dtype = np.float32), 0.1, 0.2)
+    test_bel_matrix.update(Vector3r(0,1), 0)
     #%%
     test_grid_loc = Vector3r(10,20)
     test_grid_loc1 = Vector3r(float(10.0),float(20.0))
@@ -792,6 +969,15 @@ if __name__ == "__main__":
     #now make sure that the order in which updates are made doesn't matter
     assert math.isclose(cb_bel_map3.get_probability_source_in_grid(),cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) and math.isclose(cb_bel_map3.get_probability_source_in_grid() ,cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) 
     
+    
+    #%%
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, 0.1, 0.2)
+    cb_bel_map1.get_probability_source_in_grid()
+    print(cb_bel_map1.get_belief_map_components())
+    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 0)
+    cb_bel_map1.get_probability_source_in_grid()
+    print(cb_bel_map1.get_belief_map_components())
     #%%
     # Check whether the optimized grid map gives same results as unoptimized grid map
     cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
@@ -801,8 +987,9 @@ if __name__ == "__main__":
     cb_bel_map3 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
 
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,0), 1)
+    
     cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 0)
+    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,0), 1)
     cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 1)
     cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,2), 0)
     
@@ -1101,25 +1288,63 @@ if __name__ == "__main__":
         
         
         
+    #%%
+    import random
+    grid = UE4Grid(1,1,Vector3r(0.0), 10, 10)
+    grid.get_grid_points()
+    bel_maps = [create_single_source_belief_map(grid, beta = 0.1, alpha = i/20) for i in range(20)]
+    beliefs = [[0.5] for i in bel_maps]
+    #%%
+    for i in range(10):
+        for j in range(10):
+            for bel_map_index, bel_map in enumerate(bel_maps):
+                #bel_map.update_from_observation(BinaryAgentObservation(Vector3r(int(random.random()*10), int(random.random() * 10),0),0, 4, 1238, 'agent1'))
+                bel_map.update_from_observation(BinaryAgentObservation(Vector3r(i,j),0, i, 1238, 'agent1'))
+                beliefs[bel_map_index].append(bel_map.get_probability_source_in_grid())
+#%%
+    import matplotlib.pyplot as plt
+    plt.figure()    
+    for belief_index, belief in enumerate(beliefs):
+        plt.plot([i for i in range(101)], belief, label = "FPR {}".format(belief_index/20))
+    plt.legend(loc = 'right')
+    plt.title("Belief evolution over time with a sequence of negative predictions for varying False Positive Rates of detection")
+    #%%
+#    class BeliefMatrix:
+#    '''Belief can be described by a matrix. Updates are performed as matrix addition and 
+#    multiplication'''
+    
+    
+    #%%
+    
+    fpr = 0.1
+    fnr = 0.2
+    def get_diag_indices(estimated_state):
+        index1, index2 = np.diag_indices(estimated_state.shape[0])
+        np.ndarray.astype(index1,np.int32, copy = False)
+        return index1
         
+
+    @numba.jit(nopython=True)    
+    def _setup_matrices(initial_state):
+        '''Code to setup matrices separated out'''
         
-        
-        
+        estimated_state = np.identity(len(initial_state))
+
+        indices = np.arange(0,len(initial_state)-1)
+
+        estimated_state *= initial_state
+        identity = np.identity(len(initial_state))
+        fpr_matrix = fpr * np.identity(len(initial_state))
+        fnr_matrix = fnr * np.identity(len(initial_state))
+#        np.fill_diagonal(fpr_matrix, fpr)
+#        np.fill_diagonal(fnr_matrix, fnr)
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    #%%
+    #_setup_matrices(np.array(initial_state, np.float64), get_diag_indices(np.zeros((len(initial_state),len(initial_state)))))
+    _setup_matrices(np.array(initial_state, dtype = np.float64))
+#%%    #def __init__(self, locations, initial_states, fpr, fnr):
+
+    #test_bel_matrix.update(Vector3r(0,2),0)
+    #print(test_bel_matrix.estimated_state)
+    #test_bel_matrix.get_prob_in_grid()
+

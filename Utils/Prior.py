@@ -99,6 +99,8 @@ if __name__ == '__main__':
     ax = fig.gca(projection='3d')
     ax.set_zlim3d(0, 0.02)
     ax.plot_wireframe(x, y, prior[0])
+    ax.set_zlabel("Agent belief source is at grid location")
+    ax.text2D(0.05, 0.95, "Agent belief source is at grid location", transform=ax.transAxes)
     
     plot_gaussian_prior(grid, means, covariance_matrix)
     

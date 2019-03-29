@@ -21,7 +21,8 @@ Created on Mon Feb 25 19:08:57 2019
 
 import math
 from abc import ABC, abstractmethod
-from Utils.BeliefMap import ChungBurdickBeliefMap, BeliefMapComponent, get_lower_and_upper_confidence_given_obs
+from Utils.BeliefMap import (SingleSourceBinaryBeliefMap, BeliefMapComponent, get_lower_and_upper_confidence_given_obs, 
+    calc_single_source_posterior_given_sensor_sensitivity, calculate_binary_sensor_probability)
 from Utils.ObservationSetManager import ObservationSetManager
 import sys
 sys.path.append('..')
@@ -32,6 +33,7 @@ from Utils.Vector3r import Vector3r
 from Utils.AgentObservation import AgentObservation#, BinaryAgentObservation
 from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
 
+#%%
 #It can also be shown that the boundaries A and B can be calculated as with very good approximation as
 #A = log(beta/(1-alpha))      B = log((1-beta)/alpha)
 #alpha = P{Deciding for HA when H0 is true} and beta = P{Deciding for H0 when HA is true}.
@@ -49,7 +51,7 @@ def log_likelihood_ratio(s_i, bel_map):
     Here I want to determine the likelihood ratio between the alternative hypothesis and the null hypothesis. Assuming that the null hypothesis is 
     that the source is not present, calculated as L(theta_0 | x) / L(theta_1 | x) = P(x | H = 0) / P(x | H = 1) using Chung & Burdick notation
     '''
-    if not isinstance(bel_map, ChungBurdickBeliefMap):
+    if not isinstance(bel_map, SingleSourceBinaryBeliefMap):
         raise NotImplementedError("Calculating the log likelihood ratio is only implemented for the single source framework")
     else:
         raise NotImplementedError("Haven't found a clean closed formula for this yet")
@@ -72,7 +74,7 @@ class SingleSourceSearchTermination(ABC):
     @abstractmethod
     def should_end_search(self, belief_map) -> bool:
         '''Given a belief map, returns true if the search should be terminated or false if the search should continue.'''
-        if not isinstance(belief_map, ChungBurdickBeliefMap):
+        if not isinstance(belief_map, SingleSourceBinaryBeliefMap):
             raise NotImplementedError("Calculating the log likelihood ratio is only implemented for the single source framework")
         else:
             raise NotImplementedError("This is a base class - use a subclass")
@@ -88,15 +90,15 @@ class UpperLowerBoundTotalBeliefSearchTermination(SingleSourceSearchTermination)
         
     def should_end_search(self, belief_map) -> bool:
         '''Given a belief map, returns true if the search should be terminated or false if the search should continue.'''
-        if not isinstance(belief_map, ChungBurdickBeliefMap):
+        if not isinstance(belief_map, SingleSourceBinaryBeliefMap):
             raise NotImplementedError("Total belief search termination is only valid for single-source belief maps")
         
         return self._accept_source_in_grid(belief_map) or self._accept_source_not_in_grid(belief_map)
         
-    def _accept_source_in_grid(self, belief_map: ChungBurdickBeliefMap) -> bool:
+    def _accept_source_in_grid(self, belief_map: SingleSourceBinaryBeliefMap) -> bool:
         return belief_map.get_probability_source_in_grid() > self.upper_belief_bound
     
-    def _accept_source_not_in_grid(self, belief_map: ChungBurdickBeliefMap) -> bool:
+    def _accept_source_not_in_grid(self, belief_map: SingleSourceBinaryBeliefMap) -> bool:
         return belief_map.get_probability_source_in_grid() < self.lower_belief_bound    
     
 class ConfidenceIntervalSearchTermination(UpperLowerBoundTotalBeliefSearchTermination):
@@ -110,7 +112,7 @@ class ConfidenceIntervalSearchTermination(UpperLowerBoundTotalBeliefSearchTermin
         self.confidence_width = confidence_width
     
     
-    def should_end_search(self, belief_map: ChungBurdickBeliefMap, observation_set_manager: ObservationSetManager) -> bool:
+    def should_end_search(self, belief_map: SingleSourceBinaryBeliefMap, observation_set_manager: ObservationSetManager) -> bool:
         '''Given a belief map, returns true if the search should be terminated or false if the search should continue.'''
         if self._accept_source_in_grid(belief_map):
             greatest_likelihood_component = belief_map.get_most_likely_component()
@@ -133,7 +135,7 @@ class IndividualGridCellSearchTermination(UpperLowerBoundTotalBeliefSearchTermin
         #the difference in belief between the highest value and the second highest value
         self.min_belief_difference = min_belief_difference
     
-    def should_end_search(self, belief_map: ChungBurdickBeliefMap, observation_set_manager: ObservationSetManager) -> bool:
+    def should_end_search(self, belief_map: SingleSourceBinaryBeliefMap, observation_set_manager: ObservationSetManager) -> bool:
         '''
         Given a belief map, returns true if the search should be terminated or false if the search should continue.
         '''
@@ -164,7 +166,7 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         Here I want to determine the likelihood ratio between the alternative hypothesis and the null hypothesis. Assuming that the null hypothesis is 
         that the source is not present, calculated as L(theta_0 | x) / L(theta_1 | x) = P(H = 0 | x) / P(H = 1 | x) using Chung & Burdick notation
         '''
-        if not isinstance(bel_map, ChungBurdickBeliefMap):
+        if not isinstance(bel_map, SingleSourceBinaryBeliefMap):
             raise NotImplementedError("Calculating the log likelihood ratio is only implemented for the single source framework")
         else:
             raise NotImplementedError("This has not been implemented yet")
@@ -174,6 +176,17 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         next_s_i = s_i + log_likelihood_ratio(s_i)
         return next_s_i
     
+#%%
+def calculate_data_probability(sequence, locations, possible_source_location, fpr, fnr):
+    '''sequence is a list of 0, 1. Locations is a sequence of Vector3r, agent_location
+    is a vector3r'''
+    prior = 1
+    for location, reading in zip(locations, sequence):
+        prior *= calculate_binary_sensor_probability(reading, location, possible_source_location, fpr, fnr)
+    return prior
+
+def calulate_probability_of_evidence(sequence, locations, possible_locations, fpr, fnr):
+    return sum(calculate_data_probability(sequence, locations, possible_location, fpr, fnr) for possible_location in possible_locations)
     
 #%%
 if __name__ == '__main__':
@@ -183,7 +196,7 @@ if __name__ == '__main__':
     false_positive_rate = 0.1
     #prob of negative reading at source location = missed detection = beta
     false_negative_rate = 0.13
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
 
     obs1 = AgentObservation(Vector3r(2,4,0),1, 1, 1234, 'agent1')
@@ -233,7 +246,7 @@ if __name__ == '__main__':
 #%%
     import time
     import random
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.08) for grid_point in test_grid.get_grid_points()], 
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.08) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.08 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
     
     i = 0
@@ -260,7 +273,7 @@ if __name__ == '__main__':
     false_negative_rate = 0.2
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 2, 3)
     set_uniform_prior = 0.08
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, set_uniform_prior ) for grid_point in test_grid.get_grid_points()], 
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, set_uniform_prior ) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: set_uniform_prior  for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
     
     number_negative_readings = 4
@@ -302,7 +315,7 @@ if __name__ == '__main__':
     false_negative_rate = 0.2
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 5, 3)
     set_uniform_prior = 0.008
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, set_uniform_prior ) for grid_point in test_grid.get_grid_points()], 
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, set_uniform_prior ) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: set_uniform_prior  for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
     #%%
     from Utils.ObservationSetManager import ObservationSetManager
@@ -351,13 +364,16 @@ if __name__ == '__main__':
 
     #%%
 
-
-
-
-
-
-
-
+    sequence = [1,0,0,0,1,1,0]
+    fpr = 0.1
+    fnr = 0.2
+    locations = [Vector3r(1,1), Vector3r(1,2), Vector3r(1,3), Vector3r(2,2), Vector3r(1,2), Vector3r(4,4), Vector3r(1,2)]
+    more_likely_locations = [Vector3r(1,1), Vector3r(1,2), Vector3r(1,3), Vector3r(2,2), Vector3r(1,2), Vector3r(1,1), Vector3r(1,2)]
+    test_grid = UE4Grid(1, 1, Vector3r(0,0), 5, 3)
+    likelihood = calculate_data_probability(sequence, locations, Vector3r(1,2), fpr, fnr)
+    print(likelihood)
+    print(calulate_probability_of_evidence(sequence, locations, test_grid.get_grid_points(), fpr, fnr))
+    print(calulate_probability_of_evidence(sequence, more_likely_locations, test_grid.get_grid_points(), fpr, fnr))
 
 
 

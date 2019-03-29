@@ -23,7 +23,7 @@ from Utils.Vector3r import Vector3r
 
 #%%
 class BaseSensor(ABC):
-    '''Base class for all sensor models'''
+    '''Base class for all sensor models. A sensor model returns a value which is location-dependent'''
     @abstractmethod
     def _get_reading(self, location):
         '''Calculates the sensor reading at the location. This can be a probability, a 
@@ -59,7 +59,8 @@ class BinarySensorParameters:
 
 
 class BinarySensor(BaseSensor):
-    '''A base class which returns a 0-1 detection value which represent present or not present'''
+    '''A base class which returns a 0-1 detection value which represent present or not present, 
+    according to the false positive rate and false negative rate provided'''
     
     def get_reading(self, location):
         reading = self._get_reading(location)
