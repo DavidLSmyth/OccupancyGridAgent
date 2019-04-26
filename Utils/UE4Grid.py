@@ -16,6 +16,7 @@ from Utils.Vector3r import Vector3r
 
 import matplotlib.pyplot as plt
 from matplotlib import colors
+import numpy as np
 
 class UE4GridFactory:
     def __init__(self, lng_spacing, lat_spacing, origin, x_lim=None, y_lim=None, no_x=None, no_y=None):
@@ -41,6 +42,9 @@ class UE4GridFactory:
         self.create_grid_with_no_points()
         
     def create_grid_with_no_points(self):
+        '''Assuming it's known how many points are desired in x and y direction, 
+        creates the grid rooted at the origin'''
+        #x,y = np.meshgrid([i for i in range(10)], [i for i in range(10)], indexing = 'xy')
         self.grid = []
         backtrack = False
         for x_counter in range(self.no_x):
@@ -77,6 +81,7 @@ class UE4Grid:
         
         self.no_x = self.grid_factory.no_x
         self.no_y = self.grid_factory.no_y
+        #self.grid_points = np.array([])
     
     def get_grid_points(self):
         return self.grid_points
