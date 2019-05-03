@@ -6,7 +6,7 @@ Created on Fri Feb 15 16:24:38 2019
 """
 
 # Attempt to recreate results of 
-#A Decision-Making Framework for Control Strategies in Probabilistic Search   Timothy H. Chung and Joel W. Burdick
+
 
 import argparse
 import sys

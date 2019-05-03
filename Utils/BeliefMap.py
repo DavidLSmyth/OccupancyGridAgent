@@ -5,6 +5,10 @@ Created on Tue Nov 13 11:40:27 2018
 @author: 13383861
 """
 
+##########This is mostly deprecated
+raise DeprecationWarning('''This module is mostly deprecated, instead refere to BeliefMapVector.py for the details of how state
+                         is represented and updated''')
+
 import sys
 sys.path.append('..')
 import typing

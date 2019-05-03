@@ -5,12 +5,17 @@ Created on Mon Apr  1 10:35:47 2019
 @author: 13383861
 """
 
+'''
+This contains belief p(x_t | z_1:t) update functions, where state is defined by the random variable denoting the location
+of a source of something that can be detected, relative to an occupancy grid.
+'''
 import math
 import time
 import sys
 
 import numpy as np
 import numba
+
 #%%
 #version that uses matrix multiplication - for now just use vectors as no point in using more space than 
 #necessary    
@@ -147,11 +152,12 @@ def get_next_estimated_state(location_index, reading, previous_estimated_state, 
 class BeliefVector:
     '''Belief can be described by a vector. Updates are performed as vector addition and 
     multiplication.'''
-    def __init__(self, valid_locations, initial_state, fpr, fnr):
+    def __init__(self, valid_locations: list, initial_state: np.array, fpr, fnr):
         self.fpr = fpr
         self.fnr = fnr
         # a list of valid location objects, whose order corresponds to the estimated state
         self.locations = valid_locations
+        #sets up observation and transition matrices
         self._setup_matrices(initial_state)
         #by convention state "0" which represents none of the grid cells containing the source
         #is the last element on the diagonal        
@@ -180,9 +186,11 @@ class BeliefVector:
         self.estimated_state = get_next_estimated_state(location_index, reading, self.estimated_state, self.update_fns)
         
     def get_location_index(self,location):
+        #this shouldn't need to be used - location indices are ordered by convention
         return self.locations.index(location)
     
     def update(self, location, reading):
+        '''Given a reading and a location, update the posterior belief in the state given the measurement'''
         location_index = self.get_location_index(location)
 #        print("calling _update_calculation with values", location_index, reading)
         self._update(location_index, reading)      
@@ -193,7 +201,43 @@ class BeliefVector:
     def get_prob_in_grid(self):
         return self.estimated_state.sum() - self.estimated_state[self.estimated_state.shape[0]-1]
     
+    
 
+class DiscreteBayesFilter:
+    '''Refer to AI:AMA Page 579 for details. Only valid for a single state variable'''
+    
+    def __init__(self, transition_model, measurement_models, initial_state):
+        '''
+        Transition model is the matrix which defines p(Xt | Xt-1). 
+        Measurement models is the a dictionary mapping an observation to a 
+        measurement model matrix which defines p(Et | Xt). 
+        Assuming that user is working with a hidden Markov model.
+        '''
+        self.transition_model = transition_model
+        self.measurement_models = measurement_models
+        
+    def calculate_forward_pass(self, observation, ):
+        pass
+    
+    def calculate_backward_pass(self):
+        pass
+    
+    def get_filter(self):
+        pass
+    
+    def get_smoother(self):
+        pass
+    
+    def get_predictor(self):
+        pass
+    
+    def get_fixed_lag(self):
+        pass
+    
+    def get_most_likely_sequence(self):
+        pass
+    
+    
 #%%    
 def _gen_data(timings, fpr, fnr, test_grid_sizes):
     for test_grid_index, test_grid_size in enumerate(test_grid_sizes):

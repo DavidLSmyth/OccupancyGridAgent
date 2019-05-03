@@ -5,6 +5,8 @@ Created on Tue Mar 12 16:04:45 2019
 @author: 13383861
 """
 
+from OccupancyGrid.Agents import OccupancyGridAgent, SimpleGridAgent, SimpleGridAgentWithSources
+
  
 class SimpleGridAgent(BaseGridAgent):
     def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
@@ -90,7 +92,9 @@ class SimpleGridAgent(BaseGridAgent):
 
 #this is the agent to use for testing with rad source
 class SimpleGridAgentWithSources(SimpleGridAgent):
-    
+    '''
+    This agent designed to explore a grid environment.
+    '''
     def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
         super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, false_positive_rate, false_negative_rate)
         
@@ -131,7 +135,7 @@ class SimpleGridAgentWithSources(SimpleGridAgent):
 
 
 class OccupancyGridAgent():
-    '''agent that moves around an occupancy grid in order to locate a source of radiation. Uses a rav agent'''
+    '''Agent that moves around an occupancy grid in order to locate a source of radiation. Uses a rav agent'''
     ImageDir = 'D:/ReinforcementLearning/DetectSourceAgent/Data/SensorData'
     #stores analysis csvs. Each csv contains agent state at each timestep
     AgentStateDir = "D:/ReinforcementLearning/DetectSourceAgent/Analysis"

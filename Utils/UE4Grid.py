@@ -83,7 +83,7 @@ class UE4Grid:
         self.no_y = self.grid_factory.no_y
         #self.grid_points = np.array([])
     
-    def get_grid_points(self):
+    def get_grid_points(self) -> "sorted list":
         return self.grid_points
     
     
