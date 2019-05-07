@@ -12,6 +12,8 @@ of a source of something that can be detected, relative to an occupancy grid.
 import math
 import time
 import sys
+import typing
+from Utils.Vector3r import Vector3r
 
 import numpy as np
 import numba
@@ -105,7 +107,6 @@ import numba
         
 #@numba.jit(nopython = True)
 def _get_next_estimated_state_function_pos_reading(matrix_size, a1, b1):
-    #location_matrix = np.zeros((matrix_size, matrix_size))
     @numba.jit(nopython = True, parallel = True)
     def _get_next_estimated_state(location_index, previous_estimated_state):
         '''Returns a vector representing the next estimated state given a positive belief reading'''
@@ -116,17 +117,22 @@ def _get_next_estimated_state_function_pos_reading(matrix_size, a1, b1):
     return _get_next_estimated_state
 
 #non-cuda version    
-@numba.jit(nopython = True)
+#@numba.jit(nopython = True)
 def _get_next_estimated_state_function_neg_reading(matrix_size, a0, b0):
-    #location_matrix = np.zeros((matrix_size, matrix_size))
     @numba.jit(nopython = True, parallel = True)
     def _get_next_estimated_state(location_index, previous_estimated_state):
         '''Returns a vector representing the next estimated state given a negative belief reading'''
-        location_matrix = np.zeros((matrix_size, matrix_size))
-        location_matrix[location_index,location_index] = 1
-        next_estimated_state = previous_estimated_state *(location_matrix * b0 + (np.ones(matrix_size) - location_matrix)*a0)
+        location_matrix = np.zeros(matrix_size)
+        location_matrix[location_index] = 1
+        next_estimated_state = previous_estimated_state * (location_matrix * b0 + (np.ones(matrix_size) - location_matrix)*a0)
         return next_estimated_state/next_estimated_state.sum()
     return _get_next_estimated_state
+
+
+#Allow the user to specify certain locations which have zero probability of detection 
+#due to a previous detection having already occurred there
+
+
 
 #%%
 #@numba.jit(nopython = True)
@@ -151,8 +157,9 @@ def get_next_estimated_state(location_index, reading, previous_estimated_state, 
 
 class BeliefVector:
     '''Belief can be described by a vector. Updates are performed as vector addition and 
-    multiplication.'''
-    def __init__(self, valid_locations: list, initial_state: np.array, fpr, fnr):
+    multiplication. By convention the belief vector is in the format:
+    (source present at first location, ...., source present at last location, source not present in grid)'''
+    def __init__(self, valid_locations: typing.List[Vector3r], initial_state: np.array, fpr, fnr):
         self.fpr = fpr
         self.fnr = fnr
         # a list of valid location objects, whose order corresponds to the estimated state
@@ -161,6 +168,7 @@ class BeliefVector:
         self._setup_matrices(initial_state)
         #by convention state "0" which represents none of the grid cells containing the source
         #is the last element on the diagonal        
+        
 
     def _setup_matrices(self, initial_state):
         '''Code to setup matrices separated out'''
@@ -185,25 +193,50 @@ class BeliefVector:
     def _update(self, location_index, reading):
         self.estimated_state = get_next_estimated_state(location_index, reading, self.estimated_state, self.update_fns)
         
-    def get_location_index(self,location):
+    def get_location_index(self,location: Vector3r):
         #this shouldn't need to be used - location indices are ordered by convention
         return self.locations.index(location)
     
-    def update(self, location, reading):
+    def update(self, location: typing.List[Vector3r], reading):
         '''Given a reading and a location, update the posterior belief in the state given the measurement'''
         location_index = self.get_location_index(location)
 #        print("calling _update_calculation with values", location_index, reading)
-        self._update(location_index, reading)      
+        self._update(location_index, reading)
+    
+    def update_from_multiple_measurements(self, locations: typing.List[Vector3r], readings: list):
+        '''Updates the posterior p(xt | e1:t) given multiple measurements'''
+        assert len(locations) == len(readings)
+        for location, reading in zip(locations, readings):
+            self.update(location, reading)
         
     def get_estimated_state(self):
+        '''Returns the occupancy values for each cell location in list of locations'''
         return self.estimated_state
         
     def get_prob_in_grid(self):
+        '''Returns the agent's belief that the source is present in the grid.'''
         return self.estimated_state.sum() - self.estimated_state[self.estimated_state.shape[0]-1]
     
-    
+class BeliefVectorMultipleSources(BeliefVector):
+    '''
+    A derived class of BeliefVector which facilitates the recording of the location of previously detected sources, 
+    which means that an agent can update it's belief state
+    '''
+    def __init__(self, valid_locations: typing.List[Vector3r], initial_state: np.array, fpr, fnr):
+        super().__init__(valid_locations, initial_state, fpr, fnr)
+        
+    def set_location_prob_to_zero(self, location):
+        #set the location index belief to zero
+        self.estimated_state[self.get_location_index(location)] = 0
+        #normalize to 1
+        self.estimated_state = self.estimated_state/self.estimated_state.sum()
+        #from now on, the estimated value of the given state will not change from 0 since
+        #updates are performed via multiplication
+        #any observations at the modified grid location will have no effect on the update
 
+#%%
 class DiscreteBayesFilter:
+    
     '''Refer to AI:AMA Page 579 for details. Only valid for a single state variable'''
     
     def __init__(self, transition_model, measurement_models, initial_state):
@@ -216,7 +249,7 @@ class DiscreteBayesFilter:
         self.transition_model = transition_model
         self.measurement_models = measurement_models
         
-    def calculate_forward_pass(self, observation, ):
+    def calculate_forward_pass(self, observation ):
         pass
     
     def calculate_backward_pass(self):
@@ -239,6 +272,8 @@ class DiscreteBayesFilter:
     
     
 #%%    
+        
+#generate some data to test how quick updating is
 def _gen_data(timings, fpr, fnr, test_grid_sizes):
     for test_grid_index, test_grid_size in enumerate(test_grid_sizes):
         print(test_grid_index)
@@ -333,6 +368,16 @@ if __name__ == '__main__':
             assert math.isclose(belief,0.0017889087656529517, rel_tol = 0.000001), belief
     
     #%%
+    #check that can successfully set the belief that a source in certain grid locations are zero
+    bel_vec_mul_sources = BeliefVectorMultipleSources(valid_locations, initial_state, fpr, fnr)
+    bel_vec_mul_sources.update(Vector3r(2,3), 0)
+    bel_vec_mul_sources.assert_well_defined()
+    
+    bel_vec_mul_sources.set_location_prob_to_zero(Vector3r(5,0))
+    assert bel_vec_mul_sources.estimated_state[5] == 0
+    bel_vec_mul_sources.update(Vector3r(4,3), 1)
+    assert bel_vec_mul_sources.estimated_state[5] == 0
+    
     
     
     

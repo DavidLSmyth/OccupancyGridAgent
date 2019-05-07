@@ -8,6 +8,7 @@ Created on Thu Feb  7 19:30:42 2019
 
 #prior should be a map from typing.Dict[Vector3r, float]
 import typing
+import math
 
 from scipy.stats import multivariate_normal
 import numpy as np
@@ -48,11 +49,19 @@ def _generate_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance
     for x_value in [_[0] for _ in x]:
         for y_value in y[0]:
             prior[Vector3r(x_value, y_value)] = float(normed_z[x_value][y_value])
-    return normed_z, prior
+    
+    #place prior into ordered numpy array
+    list_of_grid_points = []
+    for grid_loc in grid.get_grid_points():
+        list_of_grid_points.append(prior[grid_loc])
+        
+    list_of_grid_points = np.array(list_of_grid_points)
+    numpy_prior = np.append(list_of_grid_points, 1 - list_of_grid_points.sum())
+    return numpy_prior
     
 def generate_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", initial_belief_sum = 0.5) -> "Tuple(np.array normed prior probs, prior_dict":
     '''Given a 2d vector of means, 2X2 covariance matrix, returns a 2D gaussian prior'''
-    return _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)[1]
+    return _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)
 
 
 def generate_uniform_prior(grid: UE4Grid, initial_belief_sum = 0.5, fixed_value = None):
@@ -62,72 +71,68 @@ def generate_uniform_prior(grid: UE4Grid, initial_belief_sum = 0.5, fixed_value 
         prior_val = fixed_value
     else:
         prior_val = initial_belief_sum/len(grid.get_grid_points())
-    return {grid_loc: prior_val for grid_loc in grid.get_grid_points()}
+    return np.array([prior_val for grid_loc in grid.get_grid_points()] + [1 - prior_val * grid.get_no_grid_points()])
     
-def plot_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", initial_belief_sum = 0.5):
-    prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)[0]
+    
+def plot_prior(grid: UE4Grid, prior):
     fig = plt.figure()
     x, y = np.mgrid[0:grid.get_no_points_x() * grid.get_lng_spacing():grid.get_lng_spacing(), 0:grid.get_no_points_y() * grid.get_lat_spacing():grid.get_lat_spacing()]
     ax = fig.gca(projection='3d')
+    prior = prior[:-1]
     z_lim = prior.max() * 1.02
     ax.set_zlim3d(0, z_lim)
+    if prior.shape != (len(x),len(y)):
+        prior = prior.reshape(len(x),len(y))
     ax.plot_wireframe(x, y, prior)
+    ax.set_xlabel("physical x-axis of grid")
+    ax.set_ylabel("physical y-axis of grid")
+    ax.set_zlabel("Initial prob. evidence present at grid location")
+    return fig
     
-def save_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", file_path, initial_belief_sum = 0.5):
-    prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)[0]
-    fig = plt.figure()
-    x, y = np.mgrid[0:grid.get_no_points_x() * grid.get_lng_spacing():grid.get_lng_spacing(), 0:grid.get_no_points_y() * grid.get_lat_spacing():grid.get_lat_spacing()]
-    ax = fig.gca(projection='3d')
-    z_lim = prior.max() * 1.02
-    ax.set_zlim3d(0, z_lim)
-    ax.plot_wireframe(x, y, prior)
-    plt.savefig(file_path)
+def generate_and_save_prior_fig(grid: UE4Grid, prior, file_path):
+    fig = plot_prior(grid, prior)
+    fig.savefig(file_path)
+    
+#def save_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", file_path, initial_belief_sum = 0.5):
+#    prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)[0]
+#    fig = plt.figure()
+#    x, y = np.mgrid[0:grid.get_no_points_x() * grid.get_lng_spacing():grid.get_lng_spacing(), 0:grid.get_no_points_y() * grid.get_lat_spacing():grid.get_lat_spacing()]
+#    ax = fig.gca(projection='3d')
+#    z_lim = prior.max() * 1.02
+#    ax.set_zlim3d(0, z_lim)
+#    ax.plot_wireframe(x, y, prior)
+#    plt.savefig(file_path)
+    
+def is_valid_initial_dist(no_grid_points, initial_dist):
+    '''Verifies that the specified initial distribution over a grid is valid. It's assumed that the initial distribution
+    represents the probability of evidence being located at a particular grid location.'''
+    return math.isclose(initial_dist.sum(), 1, rel_tol = 0.0000001) and len(initial_dist) == no_grid_points + 1
     
 #%%
 if __name__ == '__main__':
+#%%
 
-    from Utils.BeliefMap import BeliefMapComponent, create_single_source_belief_map, create_belief_map
     grid = UE4Grid(1, 1, Vector3r(0,0), 10, 10)
     grid.get_grid_points()
     means = [1,3]
     covariance_matrix = [[7.0, 0], [0, 15]]
     initial_belief_sum = 0.5
-    prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)
-    
-    fig = plt.figure()
-    x, y = np.mgrid[0:grid.get_no_points_x() * grid.get_lng_spacing():grid.get_lng_spacing(), 0:grid.get_no_points_y() * grid.get_lat_spacing():grid.get_lat_spacing()]
-    ax = fig.gca(projection='3d')
-    ax.set_zlim3d(0, 0.02)
-    ax.plot_wireframe(x, y, prior[0])
-    ax.set_zlabel("Agent belief source is at grid location")
-    ax.text2D(0.05, 0.95, "Agent belief source is at grid location", transform=ax.transAxes)
-    
-    plot_gaussian_prior(grid, means, covariance_matrix)
+    gaussian_prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)
+    assert is_valid_initial_dist(grid.get_no_grid_points(), gaussian_prior)
     
     prior = generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum = 0.5)
-    assert 0.49 < sum(prior.values()) < 0.51
-    
-    vectors = list(prior.keys())
-    assert type(vectors[0].x_val) == float
+    assert 0.49 < prior[:-1].sum() < 0.51
     
     
-    uniform_prior = generate_uniform_prior(grid, initial_belief_sum = 0.5)
-    assert 0.49 < sum(uniform_prior.values()) < 0.51
-    assert all([prior_val == 0.5/121 for prior_val in list(uniform_prior.values())])
-
-#    print(type(prior))
-#    Vector3r(0, 10, 0.0) in prior
-#    prior[Vector3r(0.0, 10.0, 0.0)]
-#    grid_point = grid.get_grid_points()[0]
-#    type(list(prior.keys())[0].x_val)
-#    list(prior.keys())[0]._verify_floats()
-#    
-#    [grid_point for grid_point in grid.get_grid_points()]
-#    BeliefMapComponent(grid_point, float(prior[grid_point])) 
-#    
-#    [BeliefMapComponent(grid_point, float(prior[grid_point])) for grid_point in grid.get_grid_points()]
-
-    single_source_bel_map = create_single_source_belief_map(grid, "agent1", prior = prior, alpha = 0.2, beta = 0.1)
-    multiple_source_bel_map = create_belief_map(grid, "agent1", prior = prior)
+#%%    
+    uniform_prior = generate_uniform_prior(grid, initial_belief_sum = 0.8)
+    assert is_valid_initial_dist(grid.get_no_grid_points(), uniform_prior)
+    plot_prior(grid, uniform_prior)
+    plot_prior(grid, gaussian_prior)
+    
+    from Utils.BeliefMap import create_single_source_binary_belief_map
+    #(grid, prior: np.array, fpr = 0.2, fnr = 0.1)
+    single_source_bel_map = create_single_source_binary_belief_map(grid, prior, fpr = 0.2, fnr = 0.1)
+    
 
 

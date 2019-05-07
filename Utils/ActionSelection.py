@@ -20,7 +20,7 @@ from Utils.ObservationSetManager import ObservationSetManager
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
-from Utils.BeliefMap import BeliefMap, ChungBurdickBeliefMap
+
 #create_belief_map,
 from Utils.TSPLib import TSPSolver    
 from Utils.Timer import timed
@@ -43,7 +43,7 @@ class EpsilonGreedyActionSelection(BaseActionSelection):
         self.epsilon = epsilon
         self.eff_radius = eff_radius
       
-    def get_move_from_belief_map_epsilon_greedy(self, belief_map: BeliefMap, current_grid_loc: Vector3r, epsilon: float, eff_radius = None) -> (bool, Vector3r):
+    def get_move_from_belief_map_epsilon_greedy(self, belief_map, current_grid_loc: Vector3r, epsilon: float, eff_radius = None) -> (bool, Vector3r):
         '''Epsilon greedy move selection based on neighbors in belief map'''
         
         #assume grid is regular, get all neighbors that are within the rectangle max(lat_spacing, long_spacing)
@@ -69,7 +69,7 @@ class EpsilonGreedyActionSelection(BaseActionSelection):
 
         return greedy, return_move
     
-    def get_greedy_move(self,neighbors, belief_map: BeliefMap, current_grid_loc: Vector3r, epsilon: float, eff_radius = None) -> (bool, Vector3r):
+    def get_greedy_move(self,neighbors, belief_map, current_grid_loc: Vector3r, epsilon: float, eff_radius = None) -> (bool, Vector3r):
         best_moves = sorted(neighbors, key = lambda neighbor: belief_map.get_belief_map_component(neighbor).likelihood, reverse=True)
         #print('Best moves: ', list([(move_within_radius, belief_map.get_belief_map_component(move_within_radius).likelihood) for move_within_radius in best_moves]))
 
@@ -86,7 +86,7 @@ class EpsilonGreedyActionSelection(BaseActionSelection):
         return_move = return_moves[0]
         return return_move
     
-    def get_move(self, belief_map: BeliefMap, current_grid_loc: Vector3r, explored_grid_locs: 'list of Vector3r') -> (bool, Vector3r):
+    def get_move(self, belief_map, current_grid_loc: Vector3r, explored_grid_locs: 'list of Vector3r') -> (bool, Vector3r):
         return self.get_move_from_belief_map_epsilon_greedy(belief_map, current_grid_loc, self.epsilon, self.eff_radius)
             
 #%%

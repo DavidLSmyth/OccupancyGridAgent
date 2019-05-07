@@ -5,6 +5,12 @@ Created on Wed Jan 30 14:46:56 2019
 @author: 13383861
 """
 
+'''
+This module contains both simulations of sensors and models of sensors. The sensor simulators create simulated data from the agents' environment.
+The sensor models are used in the update rules related to bayesian filtering techniques - 
+
+'''
+
 import sys
 import random
 import os
@@ -16,6 +22,7 @@ sys.path.append('.')
 
 import matplotlib.pyplot as plt
 import requests
+import numpy as np
 
 #import AirSimInterface.client as airsim
 #from AirSimInterface.types import ImageRequest, ImageType, Vector3r
@@ -187,19 +194,22 @@ class AirsimImageSensor:
 #%%
 
 #%%
-class FalsePosFalseNegBinarySensor(BinarySensor):
+class FalsePosFalseNegBinarySensorSimulator(BinarySensor):
     
     '''
-    A sensor which returns the probability of detection at a location, given a false positive rate, false negative rate 
-    and whether or not there is a source at the location
+    A sensor which returns simulated value of whether a detection occurs at a given location, given a false positive rate, false negative rate 
+    and whether or not there is a source at the location. If have more than one set of sensor parameters, not clear what the 
+    rate at which it returns negative reading should be, so a single set of calibrated sensor parameters assumed.
+    Initialise with SENSOR_SIMULATOR_PARAMETERS in config
     '''
     
-    def __init__(self, binary_sensor_parameters: BinarySensorParameters, source_locations):
+    def __init__(self, binary_sensor_parameters: BinarySensorParameters, source_locations: typing.List[Vector3r]):
         #binary sensor paramters passed in so that it can be shared by multiple objects. 
         #Also means there is only one place to make sure they are valid
-        if not isinstance(source_locations, list):
+        if not isinstance(source_locations, list) and isinstance(source_locations, Vector3r):
             source_locations = [source_locations]
-        
+            
+               
         #check all source locations in the list are valid vector3r objects
         for source_location in source_locations:
             assert isinstance(source_location, Vector3r)
@@ -209,10 +219,12 @@ class FalsePosFalseNegBinarySensor(BinarySensor):
         self.source_locations = source_locations
             
     def _get_reading(self,location):    
+        
         '''
-        Returns a 0 or 1 in accordance with false_positive_rate, false_negative_rate
+        Returns a 0 or 1 in accordance with false_positive_rate, false_negative_rate for the corresponding source if it is present
         '''
-        rand_no = random.random()
+        
+        rand_no = np.random.random()
         if location in self.source_locations:
             #0 reading (false negative) generated with probability beta at grid location where source actually lies
             if rand_no < self.false_negative_rate:
@@ -225,6 +237,9 @@ class FalsePosFalseNegBinarySensor(BinarySensor):
                 return 1
             else:
                 return 0
+            
+    def get_reading(self, location):
+        return self._get_reading(location)
 
 #
 #def get_image_response(image_loc: str):

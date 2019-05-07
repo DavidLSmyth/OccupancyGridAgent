@@ -5,10 +5,6 @@ Created on Tue Nov 13 11:40:27 2018
 @author: 13383861
 """
 
-##########This is mostly deprecated
-raise DeprecationWarning('''This module is mostly deprecated, instead refere to BeliefMapVector.py for the details of how state
-                         is represented and updated''')
-
 import sys
 sys.path.append('..')
 import typing
@@ -26,7 +22,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.AgentObservation import AgentObservation, BinaryAgentObservation
 from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
-from Utils.BeliefMapVector import BeliefVector
+from Utils.BeliefMapVector import BeliefVector, BeliefVectorMultipleSources
 
 #calculation of posterior distribution is bayes likelihood update formula
 #This is the posterior distribution of a single sensor reading, independent of all other sensor readings
@@ -176,6 +172,7 @@ def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_p
 #                                 ('likelihood', float)])
 #%%
 class _BeliefMapComponent(RecordClass):
+    '''Represents P(source = location | evidence from time = 1 to t)'''
     grid_loc: Vector3r
     likelihood: float
 #%%
@@ -238,25 +235,31 @@ def get_lower_and_upper_confidence_given_obs(observations: typing.List[AgentObse
     return get_lower_confidence_given_obs(observations), get_upper_confidence_given_obs(observations)
 
 #%%
-#######################  Belief map and tests  #######################
-class ContinuousBeliefMap:
-    '''Based on either discrete belief map or interpolation of continuous measurements'''
-    def __init__(self, xmin, xmax, ymin, ymax):
-        pass
+
         
 #######################  Belief map and tests  #######################
 #A belief map has an agent name (beliefs belong to an agent) consists of belief map components
 #Leave this as namedtuple if don't need to define methods
 class BaseBeliefMap(ABC):
-    '''Add method to create a continuous belief map. Concrete BeliefMap classes are coupled with their update rules.'''
-    def __init__(self, grid: UE4Grid, prior: typing.Dict[Vector3r, float], fpr, fnr):
-        '''apply_blur applies a gaussian blue to the belief map on each update to provide a more continuous distribution of belief map values'''
+    
+    '''
+    Add method to create a continuous belief map. Concrete BeliefMap classes are coupled with their update rules.
+    '''
+    
+    def __init__(self, grid: UE4Grid, prior: np.array, fpr, fnr):
+        
+        '''
+        Prior is assumed to be in same order as grid locations. No need to specify prior val of source not being present.
+        '''
+        
         #self.agent_name = agent_name
         self.grid = grid
         self.fpr = fpr
         self.fnr = fnr
-        initial_state = np.array([prior[grid_point] for grid_point in grid.get_grid_points()])
-        initial_state = np.append(initial_state, 1-initial_state.sum())
+        
+        #initial_state = np.array([prior[grid_point] for grid_point in grid.get_grid_points()])
+        initial_state = np.append(prior, 1-prior.sum())
+        
         #the mapping between belief at individual grid points and their location in teh belief state
         #vector is 1-1
         self.current_belief_vector = BeliefVector(grid.get_grid_points(), initial_state, fpr, fnr)
@@ -266,7 +269,7 @@ class BaseBeliefMap(ABC):
         
         #create a cache of probability updates based on grid size - e.g. for n observations, 
     
-    def get_prior(self)->typing.Dict[Vector3r, float]:
+    def get_prior(self)->np.array:
         return self.prior
     
     def get_grid(self)->UE4Grid:
@@ -279,6 +282,7 @@ class BaseBeliefMap(ABC):
         return pickle.dumps(self)
     
     def pickle_to_file(self, file_loc):
+        '''Saves belief map object to file. Useful because updates can take quite a long time to occur'''
         with open(file_loc, 'wb') as f:
             pickle.dump(self, f)
     
@@ -360,7 +364,11 @@ class BaseBeliefMap(ABC):
     def get_ith_most_likely_component(self, i):
         '''Returns the belief map component that has the highest likelihood of containing the source'''
         sorted_element = np.argsort(self.current_belief_vector)[i-1]
-        return BeliefMapComponent(self.grid.get_grid_points()[sorted_element], self.current_belief_vector[sorted_element])    
+        if sorted_element < self.grid.get_no_grid_points():
+            return BeliefMapComponent(self.grid.get_grid_points()[sorted_element], self.current_belief_vector[sorted_element])    
+        else:
+            #This is really poor design - this represents the state in which the source is not present
+            return BeliefMapComponent(Vector3r(-1, -1), self.current_belief_vector[sorted_element])
 
         #return sorted([component for component in self.belief_map_components], key = lambda component: component.likelihood)[i-1] # i-1 necessary for zero-indexed lists
     
@@ -440,18 +448,22 @@ class SingleSourceBinaryBeliefMap(BaseBeliefMap):
     negative detections at a given grid location.
     '''
     
-    def __init__(self, grid: UE4Grid, prior: typing.Dict[Vector3r, float], fpr: 'prob of false pos', fnr: 'prob of false neg'):
-        super().__init__(grid, prior, fpr, fnr)
+    def __init__(self, grid: UE4Grid, initial_distribution: np.array, fpr: 'prob of false pos', fnr: 'prob of false neg'):
+        super().__init__(grid, initial_distribution, fpr, fnr)
 
         
     def _update_map_from_observation(self, agent_observation: AgentObservation):
         '''
-        Updates a individual component in the belief map given an observation(percept).
+        Updates an individual component in the belief map given an observation(percept).
         '''
         if not isinstance(agent_observation, BinaryAgentObservation):
             raise NotImplementedError("Cannot update a non-binary observation")
         #self._update_from_prob_optimized(agent_observation.grid_loc, agent_observation.reading)
         self.current_belief_vector.update(agent_observation.grid_loc, agent_observation.reading)
+        
+    def _update_map_from_observations(self, agent_observations: typing.List[AgentObservation]):
+        for agent_observation in agent_observations:
+            self._update_map_from_observation(agent_observation)
         
     def _update_grid_component_from_observation(self, agent_observation: AgentObservation):
         pass
@@ -475,9 +487,37 @@ class SingleSourceBinaryBeliefMap(BaseBeliefMap):
         #return sum([belief_map_component.likelihood for belief_map_component in self.belief_map_components])
         
 #%%
-class MultipleSourceBinaryBeliefMap(BaseBeliefMap):
+class MultipleSourceBinaryBeliefMap(SingleSourceBinaryBeliefMap):
+    
     '''
-    Assuming that grid cells are independent of each other, maintain individual pdf for each grid cell
+    This class is exactly the same as SingleSourceBinaryBeliefMap with the only difference being
+    that the estimated state can be modified to eliminate the probability of a previous 
+    located source being included in the updates to the next source detection.
+    
+    Prior is assumed to be in direct correspondence with the grid location indices and does not include
+    the prior probability of a source not being present.
+    '''
+    
+    def __init__(self, grid: UE4Grid, initial_distribution: np.array, sensor_model_fpr: 'prob of false pos', sensor_model_fnr: 'prob of false neg'):       
+        #the mapping between belief at individual grid points and their location in teh belief state
+        #vector is 1-1
+        super().__init__(grid, initial_distribution, sensor_model_fpr, sensor_model_fnr)
+        self.current_belief_vector = BeliefVectorMultipleSources(grid.get_grid_points(), np.append(initial_distribution, 1-initial_distribution.sum()), sensor_model_fpr, sensor_model_fnr)
+
+    def mark_source_as_located(self, location: Vector3r):
+        '''
+        In the state estimate related to the location of a source of evidence, modifies the probability value at the
+        location to be zero and redistributes it's probability mass equally among all other locations.
+        All subsequent updates will still yield a zero probability of the source being at the location
+        that has been marked as discovered.
+        '''
+        self.current_belief_vector.set_location_prob_to_zero(location)
+        
+
+#%%
+class IndependenceAssumptionBeliefMap(BaseBeliefMap):
+    '''
+    Assuming that grid cells are independent of each other, maintain individual pdf for each grid cell.
     '''
     def __init__(self, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], alpha: 'prob of false pos', beta: 'prob of false neg', apply_blur = False):
         super().__init__(grid, belief_map_components, prior, apply_blur)
@@ -498,7 +538,11 @@ class MultipleSourceBinaryBeliefMap(BaseBeliefMap):
         #assuming all grid locations are independent of each other
         component_to_update = self.get_belief_map_component(agent_observation.grid_loc)
         component_to_update.likelihood = calc_posterior_from_binary_observation(agent_observation.reading, component_to_update.likelihood, self.alpha, self.beta)
+
+
 #%%
+        
+#This makes invalid assumptions regarding the distribution, should be ignored
 class ConfidenceIntervalBeliefMap:
     '''Can be used to calculate upper and lower confidence intervals on parameter estimation'''
     
@@ -562,51 +606,50 @@ class ConfidenceIntervalBeliefMap:
 #    return BeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior)
 #    #return {grid_locs[i]: ObsLocation(grid_locs[i],prior[i], 0, time.time(), observer_name) for i in range(len(grid_locs))}
 
-def create_single_source_belief_map(grid, prior = {}, fpr = 0.2, fnr = 0.1):
+
+def create_single_source_binary_belief_map(grid, prior: np.array, fpr = 0.2, fnr = 0.1):
     '''Creates an occupancy belief map for a given observer and a set of grid locations.
     Prior is a mapping of grid_points to probabilities'''
-    if not prior:
+    if prior.size == 0:
         #use uniform uninformative prior
         #in this case want all probabilities to add up to 1/2 to indicate maximum uncertainty
         prior = generate_uniform_prior(grid, initial_belief_sum = 0.5)
     return SingleSourceBinaryBeliefMap(grid, prior, fpr, fnr)
 
-def create_multiple_source_belief_map(grid, prior = {}, fpr = 0.2, fnr = 0.1):
-    if not prior:
+def create_multiple_source_binary_belief_map(grid, prior: np.array, fpr = 0.2, fnr = 0.1):
+    if prior.size == 0:
         prior = generate_uniform_prior(grid, initial_belief_sum = 1)
     return MultipleSourceBinaryBeliefMap(grid, prior, fpr, fnr)
 
-def create_confidence_interval_belief_map(grid, prior = {}):
-    if not prior: 
+def create_confidence_interval_belief_map(grid, prior: np.array):
+    if prior.size == 0: 
         prior = generate_uniform_prior(grid, initial_belief_sum = 1)
     return ConfidenceIntervalBeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()])
 #%%
-def create_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], agent_belief_map_prior: typing.Dict[Vector3r, float] = {}):
+
+
+def create_single_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], fpr, fnr, agent_belief_map_prior: np.array = np.array([])):
     '''Since the calculation of posterior likelihood is based only on prior and observations (independent of order), updating a belief map component from measurements can be done 
     by the following update formula: 
                                 prior * product(over all i observations) observation_i
         ----------------------------------------------------------------------------------------------------------------------
         prior * product(over all i observations) observation_i + (1-prior) * product(over all i observations) (1-observation_i)
     '''
-    if agent_belief_map_prior:
-        return_bel_map = create_belief_map(grid, agent_belief_map_prior)
-    else:
-        return_bel_map = create_belief_map(grid)
+    #if initial belief not provided, default uniform is used
+    return_bel_map = create_single_source_binary_belief_map(grid, agent_belief_map_prior, fpr, fnr)
     #update belief map based on all observations...
     return_bel_map.update_from_observations(agent_observations)
     return return_bel_map
 
-def create_single_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], agent_belief_map_prior: typing.Dict[Vector3r, float] = {}):
+def create_multiple_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], fpr, fnr, agent_belief_map_prior: np.array = np.array([])):
     '''Since the calculation of posterior likelihood is based only on prior and observations (independent of order), updating a belief map component from measurements can be done 
     by the following update formula: 
                                 prior * product(over all i observations) observation_i
         ----------------------------------------------------------------------------------------------------------------------
         prior * product(over all i observations) observation_i + (1-prior) * product(over all i observations) (1-observation_i)
     '''
-    if agent_belief_map_prior:
-        return_bel_map = create_single_source_belief_map(grid, agent_belief_map_prior)
-    else:
-        return_bel_map = create_single_source_belief_map(grid)
+    #if initial belief not provided, default uniform is used
+    return_bel_map = create_multiple_source_binary_belief_map(grid, agent_belief_map_prior, fpr, fnr)
     #update belief map based on all observations...
     return_bel_map.update_from_observations(agent_observations)
     return return_bel_map

@@ -14,8 +14,10 @@ from Utils.AgentObservation import AgentObservation
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
-from Utils.BeliefMap import (create_single_source_belief_map, create_multiple_source_belief_map,
- create_confidence_interval_belief_map)
+from Utils.BeliefMap import (create_single_source_binary_belief_map,
+                             create_multiple_source_binary_belief_map,
+                             create_single_source_belief_map_from_observations,
+                             create_multiple_source_belief_map_from_observations)
 
 #%%
 class AgentObservationFileReader:
@@ -152,7 +154,7 @@ class ObservationSetManager:
         self.agent_name = agent_name
         #agent should initialize its own observations
         self.init_rav_observation_set(self.agent_name)
-        self.agent_observation_file_manager = AgentObservationFileManager(agent_name, observation_file_path)
+        self.agent_observation_file_manager = AgentObservationFileWriter(agent_name, observation_file_path)
     
     #really strange behaviour: using this initialises the class with observations that don't exist... self.observation_sets[rav_name] = set()
     def init_rav_observation_set(self, rav_name, observations = None):
@@ -204,18 +206,35 @@ class ObservationSetManager:
         #this avoids recording duplicate observations
         #self.observation_sets[rav_name].update(observations)
         
-    def get_belief_map_at_timestep(self, grid, prior, timestep, agent_name, single_source = False, use_other_agent_observations = False):
-        '''Returns the agent belief/occupancy map at specified timestep. Can specify whether to use other agent observations or not'''
-        if use_other_agent_observations:
-            agents_for_belief_map = set(all(self.observation_sets.keys()))
-        else:
-            agents_for_belief_map = set([agent_name])
-            
-        observations_for_belief_map  = self._get_belief_map_using_specific_agent_observations_at_timestep(grid, prior, agents_for_belief_map, timestep, single_source) 
-        if single_source:
-            return create_single_source_belief_map_from_observations(grid, observations_for_belief_map, prior)
-        else:
-            return create_belief_map_from_observations(grid, observations_for_belief_map, prior)
+#    def get_belief_map_from_t1_to_t2(self, grid, initial_belief, t1, t2, agent_name, use_other_agent_observations = False):
+#        '''
+#        Returns the agent belief starting at a specified timestep and finishing at a second specified timestep. 
+#        Uses all available agent observations between the two timesteps to update. This is useful in the case that
+#        a source of evidence has been located and a second source of evidence is now being subsequently located.
+#        '''
+#        if use_other_agent_observations:
+#            agents_for_belief_map = set(all(self.observation_sets.keys()))
+#        else:
+#            agents_for_belief_map = set([agent_name])
+#            
+#        observations_for_belief_map  = self._get_belief_map_using_specific_agent_observations_at_timestep(grid, prior, agents_for_belief_map, timestep, single_source) 
+#            
+        
+#    def get_belief_map_at_timestep(self, grid, initial_belief, timestep, agent_name, single_source = False, use_other_agent_observations = False):
+#        '''
+#        Returns the agent belief/occupancy map at specified timestep. Can specify whether to use other agent observations or not.
+#        Only really makes sense for a single source, since 
+#        '''
+#        if use_other_agent_observations:
+#            agents_for_belief_map = set(all(self.observation_sets.keys()))
+#        else:
+#            agents_for_belief_map = set([agent_name])
+#            
+#        observations_for_belief_map  = self._get_belief_map_using_specific_agent_observations_at_timestep(grid, initial_belief, agents_for_belief_map, timestep, single_source) 
+#        if single_source:
+#            return create_single_source_belief_map_from_observations(grid, observations_for_belief_map, initial_belief)
+#        else:
+#            return create_multiple_source_belief_map_from_observations(grid, observations_for_belief_map, initial_belief)
         
     def _get_agent_observations_at_timestep(self, agent_names: "names of the agents whose observations will be used to create the belief map", timestep):
         '''
