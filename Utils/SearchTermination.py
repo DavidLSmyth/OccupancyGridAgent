@@ -139,7 +139,7 @@ class IndividualGridCellSearchTermination(UpperLowerBoundTotalBeliefSearchTermin
         #the difference in belief between the highest value and the second highest value
         self.min_belief_difference = min_belief_difference
     
-    def should_end_search(self, belief_map: SingleSourceBinaryBeliefMap, observation_set_manager: ObservationSetManager) -> bool:
+    def should_end_search(self, belief_map: SingleSourceBinaryBeliefMap) -> bool:
         '''
         Given a belief map, returns true if the search should be terminated or false if the search should continue.
         '''
@@ -174,20 +174,30 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
     in order for the termination criteria to be met. In the opposite case where alpha and beta are both 'big' (close to 1), then the decision region will be small
     '''
     def __init__(self, prior_belief_present, probability_of_falsely_rejecting_source_is_present_given_source_is_present:"p(type 1 error)", probability_of_falsely_accepting_source_is_present_given_source_is_not_present:"p(type 2 error)"):
+        
+        assert 0 < probability_of_falsely_rejecting_source_is_present_given_source_is_present < 1
+        assert 0 < probability_of_falsely_accepting_source_is_present_given_source_is_not_present < 1
+        
         self.lower_bound = math.log(probability_of_falsely_accepting_source_is_present_given_source_is_not_present/(1-probability_of_falsely_rejecting_source_is_present_given_source_is_present))
         self.upper_bound = math.log((1-probability_of_falsely_accepting_source_is_present_given_source_is_not_present)/probability_of_falsely_rejecting_source_is_present_given_source_is_present)
         #self.prior = prior
         #self.prior_belief_source_present = prior[:-1].sum()
         #self.prior_belief_source_not_present = 1 - self.prior_belief_source_present 
-        self.prior_log_difference = math.log(1-prior_belief_present) - math.log(prior_belief_present) 
+        self.prior_log_difference = math.log(1-prior_belief_present) - math.log(prior_belief_present)
+        print("prior_belief_present: {}".format(prior_belief_present))
+        print("self.prior_log_difference: {}".format(self.prior_log_difference))
         
-    def should_end_search(self, current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
-        return self.accept_source_in_grid() or self.accept_source_not_in_grid()
+    def _should_end_search(self, current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
+        return self.accept_source_in_grid(current_belief_source_present) or self.accept_source_not_in_grid(current_belief_source_present)
 
+    def should_end_search(self, belief_map):
+        return self._should_end_search(belief_map.get_probability_source_in_grid())
+        
     def get_log_likelihood_ratio(self, current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
         '''
         Returns the log likelihood ratio log( p(E1:t | source is present) / p(E1:t | source is not present) )
         '''
+        assert 0 < current_belief_source_present < 1
         return math.log(current_belief_source_present) - math.log(1-current_belief_source_present) + self.prior_log_difference
     
     def get_critical_region(self):
@@ -240,9 +250,6 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         plt.ylabel("Log-likelihood upper and lower decision thresholds")
         plt.legend()
 
-    
-    def plot_lower_decision_boundary_fixed_type2_error(self, type2_error_rate):
-        pass
     
     def accept_source_in_grid(self, current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
         return self.get_log_likelihood_ratio(current_belief_source_present) <= self.lower_bound

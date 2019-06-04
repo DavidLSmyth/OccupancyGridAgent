@@ -99,7 +99,7 @@ class AgentObservationFileWriter:
     agent_observation_file_header = "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}".replace('{','').replace('}','')
     def __init__(self, agent_name, file_path = None):
         if not file_path:
-            self.file_path = "../Observations/" + agent_name.strip() + ".csv"
+            self.file_path = "./Observations/" + agent_name.strip() + ".csv"
         else:
             self.file_path = file_path
         self._init_file_handle()

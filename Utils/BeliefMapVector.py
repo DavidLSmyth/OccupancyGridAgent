@@ -172,7 +172,8 @@ class BeliefVector:
 
     def _setup_matrices(self, initial_state):
         '''Code to setup matrices separated out'''
-        self.estimated_state = np.ones(len(initial_state)) * initial_state
+        #self.estimated_state = np.ones(len(initial_state)) * initial_state
+        self.estimated_state = initial_state
         self.identity = np.ones(len(initial_state))
         self.fpr_matrix = self.fpr * np.ones(len(initial_state))
         self.fnr_matrix = self.fnr * np.ones(len(initial_state))
@@ -215,7 +216,7 @@ class BeliefVector:
         
     def get_prob_in_grid(self):
         '''Returns the agent's belief that the source is present in the grid.'''
-        return self.estimated_state.sum() - self.estimated_state[self.estimated_state.shape[0]-1]
+        return self.estimated_state.sum() - self.estimated_state[-1]
     
 class BeliefVectorMultipleSources(BeliefVector):
     '''
@@ -356,6 +357,7 @@ if __name__ == '__main__':
     
     valid_locations = test_grid.get_grid_points()
     bel_vec = BeliefVector(valid_locations, initial_state, fpr, fnr)
+    bel_vec.get_prob_in_grid()
     #update with a negative reading
     bel_vec.update(Vector3r(2,3), 0)
     bel_vec.assert_well_defined()

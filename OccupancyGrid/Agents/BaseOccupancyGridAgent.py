@@ -23,7 +23,9 @@ from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 
 from Utils.AgentObservation import (_init_observations_file, _update_observations_file,
-                                    get_agent_observations_file_header, AgentObservation)
+                                    get_agent_observations_file_header, AgentObservation,
+                                    BinaryAgentObservation,
+                                    get_agent_observation_for_csv)
 
 from Utils.ObservationSetManager import ObservationSetManager
 
@@ -45,7 +47,7 @@ from Communication.CommsServer import AgentCommunicatorServer
 #%%
 logging.basicConfig(filemode = 'w', level = logging.WARNING)
 root_logger = logging.getLogger('')
-log_directory = "D:/ReinforcementLearning/DetectSourceAgent/Logging/" + time.ctime().replace(' ','').replace(':','_') + "/"
+log_directory = "D:/OccupancyGrid/Logging/" + time.ctime().replace(' ','').replace(':','_') + "/"
 os.mkdir(log_directory)
 general_formatter = logging.Formatter("%(asctime)s %(levelname)s:%(name)s:%(funcName)s:%(message)s")
 csv_formatter = logging.Formatter("%(message)s")
@@ -71,14 +73,17 @@ class BaseGridAgent:
     #ObservationDir = "D:/ReinforcementLearning/DetectSourceAgent/Observations"
     #MockedImageDir = 'D:/ReinforcementLearning/DetectSource/Data/MockData'
     
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, other_active_agents = [], initial_estimated_state = np.array([]), comms_radius = 1000, logged = True):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, other_active_agents = [], comms_radius = 1000, logged = True):
         
         '''
         occupancy_simluator returns a simulated reading of whether or not a grid cell is occupied (by a source of evidence)
         '''
-        
+        print("Initialising agent")
+        self.agent_name = agent_name
+
         #configures the directory conventions for storing data
         self.configure_file_conventions()
+        print("Configured file conventions")
         #list expected types of everything here and check in future
         self.grid = grid
         
@@ -87,9 +92,8 @@ class BaseGridAgent:
 #        self.false_negative_rate = false_negative_rate
         
         self._logged = logged
-        self._initial_pos = initial_pos
-        self.prior = initial_estimated_state
-        
+
+                
         #intended position (last control action)
         self.current_pos_intended = initial_pos
         #measured position
@@ -97,6 +101,7 @@ class BaseGridAgent:
         
         #valid grid locations to explore
         self.grid_locs = grid.get_grid_points()
+        print("Configuring agent location and grid")
         
         #initialise explored grid locations as empty
         self.explored_grid_locs = []
@@ -104,27 +109,33 @@ class BaseGridAgent:
         self.timestep = 0
         self.rav_operational_height = height
         self.move_from_bel_map_callable = move_from_bel_map_callable
-        self.agent_name = agent_name
         self.agent_states_for_analysis = []
         self.other_active_agents = other_active_agents
         self.total_dist_travelled = 0
         self.distance_covered_this_timestep = 0
         
         #intialise the communications variables
+        print("Configuring agent communications")
         self.comms_radius = comms_radius
+        
         self.start_comms_server()
+        print("Started communications server")
         self.comms_client = AgentCommunicatorClient()
+        print("Started communications client")
         self.others_coordinated_this_timestep = []
         
         #manages observations of this agent and other agents
         self.observation_manager = ObservationSetManager(self.agent_name)
+        print("Initialized observation manager")
         
         #maybe should include possibility of multiple sensors?
         self.occupancy_sensor_simulator = occupancy_sensor_simulator
+        print("Initialized sensor simulator")
+        
         if self._logged:
             self.setup_logs()
 
-        self.log_msg_to_cmd("Agent " + agent_name + " is alive." , "debug", "cmd_line", self._logged)
+        self.log_msg_to_cmd("Agent " + agent_name + " has been successfull initialized." , "debug", "cmd_line", self._logged)
         
 #        #If single source, use modified single source belief map. 
 #        if single_source:
@@ -139,18 +150,20 @@ class BaseGridAgent:
         self.current_belief_map = init_belief_map
 
 
-        self.agent_state_file_loc = self.directories_mapping['AgentStateDir'] + "/{}.csv".format(self.agent_name)
-        self.observations_file_loc = self.directories_mapping['ObservationDir'] + "/{}.csv".format(self.agent_name)
+        self.agent_state_file_loc = self.directories_mapping['agentstatedir'] + "/{}.csv".format(self.agent_name)
+        self.observations_file_loc = self.directories_mapping['observationdir'] + "/{}.csv".format(self.agent_name)
         
         #self.init_state_for_analysis_file(self.agent_state_file_loc)
         self.init_observations_file(self.observations_file_loc)
         
     def configure_file_conventions(self):
         '''Configures which directory files should be saved'''
-        config_loc = './OccupancyGrid/Agents/BaseOccupancyGridAgentconfig.ini'
+        #D:\OccupancyGrid\Config\AgentConfigs
+        config_loc = './Config/AgentConfigs/{}Config.ini'.format(self.agent_name)
         config_parser = configparser.ConfigParser()
         config_parser.read(config_loc)
         self.directories_mapping = dict(config_parser['DIRECTORIES'])
+        print("Read directories_mapping as {}".format(self.directories_mapping))
     
     
     def pickle_to_file(self, file_loc):
@@ -158,7 +171,11 @@ class BaseGridAgent:
             pickle.dump(self, f)
         
     def start_comms_server(self):
-        subprocess.run(["python", "./Communication/CommsServer.py", self.agent_name])
+        #os.system("python ./Communication/CommsServer.py {}".format(self.agent_name))
+        #subprocess.run(["python", "./Communication/CommsServer.py", self.agent_name], shell = True)
+        inp = input("Hit r when comms server is up and running.")
+        while inp != 'r':
+            inp = input("Hit r when comms server is up and running.")
         
     def end_comms_server(self):
         self.comms_client.shutdown_server(self.agent_name)
@@ -231,7 +248,7 @@ class BaseGridAgent:
         self.increment_timestep()
         #actions are assumed to tell agent where to move
         action = self._select_action()
-        self.current_pos_intended = action
+        self.current_pos_intended = action[1]
         
         
         #for now action can be to move the agent to a grid location, or to recharge the battery
@@ -257,12 +274,14 @@ class BaseGridAgent:
         '''
         Records the most recently percieved sensor measurement in the observations file.
         '''
-        self.latest_observation = self.AgentObservation(self.current_pos_intended, self.current_sensor_reading, self.timestep, time.time(), self.agent_name)
-        self.update_observations_file(self.observations_file_loc, latest_observation)
-        log_msg_to_file(get_agent_observation_for_csv(latest_observation), "info", "observations")
+        self.latest_observation = BinaryAgentObservation(self.current_pos_intended, self.current_sensor_reading, self.timestep, time.time(), self.agent_name)
+        self.update_observations_file(self.observations_file_loc, self.latest_observation)
+        log_msg_to_file(get_agent_observation_for_csv(self.latest_observation), "info", "observations")
         
     def update_belief(self, observation):
         '''Updates the agents belief based on a sensor reading'''
+#        print("observation: ", observation)
+#        print("observation: ", observation.__class__)
         self.current_belief_map.update_from_observation(observation)
     
     @abstractmethod

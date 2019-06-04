@@ -6,9 +6,7 @@ Created on Wed Jan 30 14:46:56 2019
 """
 
 '''
-This module contains both simulations of sensors and models of sensors. The sensor simulators create simulated data from the agents' environment.
-The sensor models are used in the update rules related to bayesian filtering techniques - 
-
+This module contains both simulations of sensors. The sensor simulators create simulated data from the agents' environment.
 '''
 
 import sys
@@ -29,8 +27,8 @@ import numpy as np
 from Utils.Vector3r import Vector3r
 
 #%%
-class BaseSensor(ABC):
-    '''Base class for all sensor models. A sensor model returns a value which is location-dependent'''
+class BaseSensorSimulator(ABC):
+    '''Base class for all sensor simulator. A sensor simulator returns a value which is location-dependent'''
     @abstractmethod
     def _get_reading(self, location):
         '''Calculates the sensor reading at the location. This can be a probability, a 
@@ -65,7 +63,7 @@ class BinarySensorParameters:
             raise Warning("fnr should be in the range 0 - 0.5")
 
 
-class BinarySensor(BaseSensor):
+class BinarySensorSimulator(BaseSensorSimulator):
     '''A base class which returns a 0-1 detection value which represent present or not present, 
     according to the false positive rate and false negative rate provided'''
     
@@ -76,7 +74,7 @@ class BinarySensor(BaseSensor):
         else:
             return reading
         
-class ProbabilisticSensor(BaseSensor):
+class ProbabilisticSensorSimulator(BinarySensorSimulator):
     '''
     A bass class which enforces that derived classes returns a detection value in the interval [0,1]
     which represents the detection probability (or confidence) at a given location
@@ -121,7 +119,7 @@ class RadModel:
         plt.savefig(filepath)
         
 #%%
-class RadSensor(BaseSensor):
+class RadSensorSimulator(BinarySensorSimulator):
     
     def __init__(self,rad_model, sensitivity: 'sensitivity is the radius within which sensor would pick up "high" radiation'):
         self.rad_model = rad_model
@@ -194,7 +192,7 @@ class AirsimImageSensor:
 #%%
 
 #%%
-class FalsePosFalseNegBinarySensorSimulator(BinarySensor):
+class FalsePosFalseNegBinarySensorSimulator(BinarySensorSimulator):
     
     '''
     A sensor which returns simulated value of whether a detection occurs at a given location, given a false positive rate, false negative rate 
@@ -225,6 +223,8 @@ class FalsePosFalseNegBinarySensorSimulator(BinarySensor):
         '''
         
         rand_no = np.random.random()
+#        print("location: ",location)
+#        print("source_locations: ", self.source_locations)
         if location in self.source_locations:
             #0 reading (false negative) generated with probability beta at grid location where source actually lies
             if rand_no < self.false_negative_rate:
@@ -285,13 +285,13 @@ if __name__ == '__main__':
         assert True
     
 #%%
-    source_location = Vector3r(2,2)
-    cb_sensor = FalsePosFalseNegBinarySensor(binary_sensor_parameter, source_location)
+    source_locations = [Vector3r(2,2)]
+    cb_sensor = FalsePosFalseNegBinarySensorSimulator(binary_sensor_parameter, source_locations)
     no_samples = 100000
     #check fpr
     assert math.isclose(sum([cb_sensor.get_reading(Vector3r(0,0)) for i in range(no_samples)]), no_samples*fpr, rel_tol = 0.01)
     #check fnr
-    assert math.isclose(sum([1-cb_sensor.get_reading(source_location) for i in range(no_samples)]), no_samples*(fnr), rel_tol = 0.01)
+    assert math.isclose(sum([1-cb_sensor.get_reading(source_locations[0]) for i in range(no_samples)]), no_samples*(fnr), rel_tol = 0.01)
 
 
 

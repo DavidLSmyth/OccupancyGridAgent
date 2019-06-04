@@ -34,6 +34,8 @@ class _AgentObservationBase (RecordClass):
     timestep: int 
     timestamp: float 
     observer_name: str
+    
+
 #%%
 class AgentObservation(_AgentObservationBase):
     '''A wrapper class of _AgentAnalysisState to enforce correct data types'''
@@ -113,8 +115,8 @@ class AgentObservations:
     
 import functools
     
-def _get_agent_observation_for_csv(grid_loc,probability,timestep,timestamp,observer_name):
-    return functools.reduce(lambda x, y: str(x)+str(y), [grid_loc.y_val,grid_loc.x_val,grid_loc.z_val,probability,timestep,timestamp,observer_name])
+def _get_agent_observation_for_csv(grid_loc,reading,timestep,timestamp,observer_name):
+    return functools.reduce(lambda x, y: str(x)+str(y), [grid_loc.y_val,grid_loc.x_val,grid_loc.z_val,reading,timestep,timestamp,observer_name])
      
 def get_agent_observation_for_csv(agent_observation: AgentObservation):
     '''Returns elements of agent state that are important for analysis that can be written to csv. Position, battery cap., total_dist_travelled, battery_consumed, occ_grid'''
@@ -123,7 +125,7 @@ def get_agent_observation_for_csv(agent_observation: AgentObservation):
     return _get_agent_observation_for_csv(**agent_observation._asdict())
 
 def get_agent_observations_file_header():
-    return "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{probability},{timestep},{timestamp},{observer_name}".replace('{','').replace('}','')
+    return "{grid_loc.y_val},{grid_loc.x_val},{grid_loc.z_val},{reading},{timestep},{timestamp},{observer_name}".replace('{','').replace('}','')
 
 #AgentObservation = namedtuple('obs_location', ['grid_loc','probability','timestep', 'timestamp', 'observer_name'])
 def _init_observations_file(file_path):

@@ -120,6 +120,7 @@ class RAVBattery:
         self.effective_capacity_given_speed_spline = splrep(RAVBattery.speeds_ranges, sorted(self.effective_flight_ranges.values(), reverse = True))
         self.predict_capacity_given_speed = lambda speed: splev(speed, self.effective_capacity_given_speed_spline)
         self.initial_capacity = intial_capacity_percentage
+        self.current_capacity = intial_capacity_percentage
         self._is_recharging = False
         self.__charging_start_time = None
         self.__current_recharge_time = None
@@ -217,7 +218,20 @@ class RAVBattery:
     def reset(self):
         '''Resets the RAV battery to its initial state'''
         self.__init__(self.initial_capacity)
-
+        
+    def generate_capacity_readings_every_second(self, operational_speed):
+        '''
+        Generates an array of readings taken at 1s time intervals to be used to train battery hmm
+        '''
+        self.recharge_to_percentage(100)
+        capacities = []
+        #move for 1 second as often as possible
+        while test_battery.get_remaining_range_at_speed(operational_speed) > 0:
+            if not test_battery.move_by_dist_at_speed(operational_speed, operational_speed):
+                break
+            capacities.append(self.get_current_capacity())
+            print(capacities[-1])
+        return capacities
 
 class RAVBatteryAgent:
     '''
@@ -269,7 +283,8 @@ class RAVBatteryAgent:
     
     def cancel_battery_recharging(self):
         self.battery.cancel_recharging()
-            
+        
+    
             
 #%%
 
@@ -279,10 +294,13 @@ if __name__ == '__main__':
     import math
     #set initial capacity as full
     test_battery = RAVBattery(1)
-    test_battery.move_by_dist_at_speed(200, 5)
-    print(test_battery.get_current_capacity())
-    print(test_battery.get_remaining_range_at_speed(5))
-    print(test_battery.get_remaining_range_at_speed(8))
+#    test_battery.move_by_dist_at_speed(200, 5)
+#    print(test_battery.get_current_capacity())
+#    print(test_battery.get_remaining_range_at_speed(5))
+#    print(test_battery.get_remaining_range_at_speed(8))
+    data = test_battery.generate_capacity_readings_every_second(2)
+    binned_values = [round(_ * 10 ) for _ in data]
+    print(binned_values)
 #%%
     print(test_battery.move_by_dist_at_speed(200, 12))
     print(test_battery.get_current_capacity())
@@ -352,6 +370,7 @@ if __name__ == '__main__':
     bat_agent = RAVBatteryAgent(1, Vector3r(0,0))
     bat_agent.can_move_to_location()
     
+    #%%
     
     
     

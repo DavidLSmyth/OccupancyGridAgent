@@ -11,7 +11,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection
 from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
-from Utils.Sensors import RadModel, RadSensor
+from Utils.SensorSimulators import RadModel, RadSensor
 from Utils.Prior import generate_uniform_prior, generate_gaussian_prior
 
 

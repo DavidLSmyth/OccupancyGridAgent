@@ -81,8 +81,9 @@ class AgentCommunicatorServer:
     
 def main():
     agent_name = sys.argv[1]
-    print("starting comms for {}".format(agent_name))
+    print("Starting comms server for {}".format(agent_name))
     AgentCommunicatorServer(agent_name).run_app()
+    print("Comms server running for {}".format(agent_name))
             
 if __name__ == '__main__':
     main()

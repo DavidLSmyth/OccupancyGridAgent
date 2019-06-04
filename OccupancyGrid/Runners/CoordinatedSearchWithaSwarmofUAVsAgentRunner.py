@@ -20,7 +20,7 @@ from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection, SaccadicActionSelection
 from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
-from Utils.Sensors import RadModel, RadSensor, SingleSourceSensor, MultipleSourceSensor
+from Utils.SensorSimulators import RadModel, RadSensor, SingleSourceSensor, MultipleSourceSensor
 from Utils.BeliefMap import BeliefMapComponent, ChungBurdickBeliefMap
 from Utils.Prior import generate_gaussian_prior, save_gaussian_prior, generate_uniform_prior
 from Utils.ProgressBar import progress_bar

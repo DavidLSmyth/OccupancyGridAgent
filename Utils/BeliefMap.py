@@ -246,10 +246,11 @@ class BaseBeliefMap(ABC):
     Add method to create a continuous belief map. Concrete BeliefMap classes are coupled with their update rules.
     '''
     
-    def __init__(self, grid: UE4Grid, prior: np.array, fpr, fnr):
+    def __init__(self, grid: UE4Grid, initial_state: np.array, fpr, fnr):
         
         '''
-        Prior is assumed to be in same order as grid locations. No need to specify prior val of source not being present.
+        Prior is assumed to be in same order as grid locations. Initial val of source not being present is assumed
+        to be passed in (should be constructed from one of the functions in prior.py)
         '''
         
         #self.agent_name = agent_name
@@ -258,13 +259,13 @@ class BaseBeliefMap(ABC):
         self.fnr = fnr
         
         #initial_state = np.array([prior[grid_point] for grid_point in grid.get_grid_points()])
-        initial_state = np.append(prior, 1-prior.sum())
+        #initial_state = np.append(prior, 1-prior.sum())
         
         #the mapping between belief at individual grid points and their location in teh belief state
         #vector is 1-1
         self.current_belief_vector = BeliefVector(grid.get_grid_points(), initial_state, fpr, fnr)
         #self.belief_map_components.append(filter(lambda belief_map_component: belief_map_component.grid_loc == grid_loc, belief_map_components).__next__())
-        self.prior = prior
+        self.prior = initial_state
         #self.apply_blur = apply_blur
         
         #create a cache of probability updates based on grid size - e.g. for n observations, 
@@ -345,30 +346,55 @@ class BaseBeliefMap(ABC):
             raise Exception("{} is not in the belief map".format(grid_loc))
             
             
-    def save_visualisation(self, filepath):
+    def save_visualisation(self, filepath, true_source_locations = []):
         '''Saves the visualisation as a png at the specified filepath'''
         fig = plt.figure()
         ax = fig.gca(projection='3d')
         X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
         Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
-        Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
-        ax.set_zlim3d(0,1)
+        Z = self.current_belief_vector.get_estimated_state()[:-1]
+        #X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
+        #Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
+        #Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
+        #ax.set_zlim3d(0,Z.max()*1.02)
+        ax.set_zlim3d(0,16/self.grid.get_no_grid_points())
         ax.plot_trisurf(X, Y, Z)
+        true_source_locations = [Vector3r(2,4), Vector3r(5,7)]
+
+        ax.scatter(list(map(lambda coord: coord.x_val, true_source_locations)), list(map(lambda coord: coord.y_val, true_source_locations)),
+                     [1/self.grid.get_no_grid_points() for _ in range(len(true_source_locations))], c = "red")
         plt.savefig(filepath)
+        plt.close(fig)        
+    
+    def show_visualisation(self):
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+        X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
+        Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
+        Z = self.current_belief_vector.get_estimated_state()[:-1]
+        #Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
+        ax.set_zlim3d(0,Z.max()*1.02)
+        ax.plot_trisurf(X, Y, Z)
+        plt.show()
     
     def get_most_likely_component(self):
         '''Returns the belief map component that has the highest likelihood of containing the source'''
         #return max([component for component in self.belief_map_components], key = lambda component: component.likelihood)
+        #print("Most likely component: {}".format(self.current_belief_vector.get_estimated_state().max()))
         self.current_belief_vector.get_estimated_state().max()
     
     def get_ith_most_likely_component(self, i):
-        '''Returns the belief map component that has the highest likelihood of containing the source'''
-        sorted_element = np.argsort(self.current_belief_vector)[i-1]
+        '''
+        Returns the belief map component that has the highest likelihood of containing the source.
+        This excludes the state that the source is not present in the environment.
+        '''
+        #take negative to sort in descending order
+        sorted_element = np.argsort(-self.current_belief_vector.get_estimated_state())[i-1]
         if sorted_element < self.grid.get_no_grid_points():
-            return BeliefMapComponent(self.grid.get_grid_points()[sorted_element], self.current_belief_vector[sorted_element])    
+            return BeliefMapComponent(self.grid.get_grid_points()[sorted_element], self.current_belief_vector.get_estimated_state()[sorted_element])
         else:
             #This is really poor design - this represents the state in which the source is not present
-            return BeliefMapComponent(Vector3r(-1, -1), self.current_belief_vector[sorted_element])
+            return BeliefMapComponent(Vector3r(-1, -1), self.current_belief_vector.get_estimated_state()[-1])
 
         #return sorted([component for component in self.belief_map_components], key = lambda component: component.likelihood)[i-1] # i-1 necessary for zero-indexed lists
     
@@ -502,7 +528,7 @@ class MultipleSourceBinaryBeliefMap(SingleSourceBinaryBeliefMap):
         #the mapping between belief at individual grid points and their location in teh belief state
         #vector is 1-1
         super().__init__(grid, initial_distribution, sensor_model_fpr, sensor_model_fnr)
-        self.current_belief_vector = BeliefVectorMultipleSources(grid.get_grid_points(), np.append(initial_distribution, 1-initial_distribution.sum()), sensor_model_fpr, sensor_model_fnr)
+        self.current_belief_vector = BeliefVectorMultipleSources(grid.get_grid_points(), initial_distribution, sensor_model_fpr, sensor_model_fnr)
 
     def mark_source_as_located(self, location: Vector3r):
         '''
@@ -666,6 +692,11 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
 
 #%%
 if __name__ == "__main__":
+    
+    #%%
+   
+    
+    
     #%%
     test_grid_loc = Vector3r(10,20)
     test_grid_loc1 = Vector3r(float(10.0),float(20.0))
@@ -682,13 +713,28 @@ if __name__ == "__main__":
     #%%
     #tests for belief map
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 10, 6)
-    test_map = create_single_source_belief_map(test_grid)
-    test_map.current_belief_vector.estimated_state
+    delta = 1/(2*len(test_grid.get_grid_points()))
+    test_map = create_single_source_binary_belief_map(test_grid, np.append(np.array([delta for _ in range(test_grid.get_no_grid_points())]), 1- (delta) * test_grid.get_no_grid_points()))
+    test_map.current_belief_vector.get_estimated_state()
     #check prior values    
-    assert all([math.isclose(prior_val,1/(2*len(test_grid.get_grid_points())), rel_tol = 0.0001) for prior_val in test_map.prior.values()])
+    assert all([math.isclose(prior_val,1/(2*len(test_grid.get_grid_points())), rel_tol = 0.0001) for prior_val in test_map.prior[:-1]])
     assert math.isclose(test_map.get_belief_map_component(Vector3r(0,0)).likelihood,BeliefMapComponent(Vector3r(0,0), 1/(2*len(test_grid.get_grid_points()))).likelihood, rel_tol = 0.0001)
     assert test_map.get_belief_map_component(Vector3r(0,0)).grid_loc == BeliefMapComponent(Vector3r(0,0), 1/(2*len(test_grid.get_grid_points()))).grid_loc
+
+#%%    
+    #check that belief map can give back most likely component    
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(1,0,0),1, 1, 1234, 'agent1'))
+    print(test_map.current_belief_vector.get_estimated_state())
+    #most likely location should now be at 1,2
+    assert test_map.get_ith_most_likely_component(1).grid_loc == Vector3r(-1,-1),test_map.get_ith_most_likely_component(1).grid_loc
+    assert test_map.get_ith_most_likely_component(2).grid_loc == Vector3r(1,0),test_map.get_ith_most_likely_component(2).grid_loc
     
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0,0),1, 1, 1234, 'agent1'))
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0,0),1, 2, 1235, 'agent1'))
+    assert test_map.get_ith_most_likely_component(2).grid_loc == Vector3r(2,0),test_map.get_ith_most_likely_component(2).grid_loc
+    
+#    test_array = np.array([0.5,0.2,0.6,0.1])
+#    np.argsort(test_array)
     #%%
 #    del test_map
 #    #prove order in which observations come in doesn't matter

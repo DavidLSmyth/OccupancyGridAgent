@@ -17,8 +17,8 @@ from OccupancyGrid.Agents.BaseOccupancyGridAgent import BaseGridAgent
 from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 from Utils.BeliefMap import BeliefMapComponent
-
-
+from Utils.BeliefMapVector import BeliefVectorMultipleSources
+from Utils.BatteryDBN import StochasticBatteryHMM
 
  
 class SimpleGridAgent(BaseGridAgent):
@@ -28,8 +28,8 @@ class SimpleGridAgent(BaseGridAgent):
     the agent does not communicate nor have battery.
     '''
     
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], initial_estimated_state = np.array([]), comms_radius = 1000, logged = True):
-        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, other_active_agents, initial_estimated_state, comms_radius, logged)
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True):
+        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, other_active_agents, comms_radius, logged)
         #for simple grid agent assume it is in correct grid square
         self.search_terminator = search_terminator
         
@@ -110,17 +110,28 @@ class SimpleGridAgent(BaseGridAgent):
         Assuming there is 1 or 0 sources present in the available set of grid locations, 
         this method instructs the agent to attempt to locate it.
         This is done by executing the following sequence of abstract actions:
+    
             1). Initialize the belief map given the information the agent is initialized with 
             2). Choose an action to explore the region using the strategy provided by move_from_bel_map_callable
             3). Gather sensor data using a sensor model
             4). Update agent belief based on the gathered sensor data
             5). Terminate if termination criteria met (based on agent belief) else continue from 2.
+    
+        This is not suitable for multi-agent simulations, since agents need to coordinate on each time step.
+        Instead, these steps will need to be executed for each agent externally, which should be easy to do with the 
+        iterate_next_timestep method.
         '''
         while not self.search_terminator.should_end_search(self.current_belief_map):
             #this actuates, perceives, updates belief map in one step
             self.iterate_next_timestep()
+            if self.timestep % 1 == 0:
+                print(self.timestep)
+                self.current_belief_map.save_visualisation("D:/OccupancyGrid/Data/BeliefMapData/BeliefEvolutionImages/img{:03.0f}.png".format(self.timestep))
         #return the most likely component of the belief map. This could be the component that represents the source is not present at all
-        return self.current_belief_map.get_most_likely_component()
+        print(self.current_belief_map.current_belief_vector.get_estimated_state())
+        print("source located at {}".format(self.current_belief_map.get_ith_most_likely_component(1).grid_loc))
+        #return self.current_belief_map.get_most_likely_component()
+        return self.current_belief_map.get_ith_most_likely_component(1)
         
 
 class MultipleSourceDetectingGridAgent(SimpleGridAgent):
@@ -128,10 +139,10 @@ class MultipleSourceDetectingGridAgent(SimpleGridAgent):
     This agent extends the simple grid agent and is designed to locate multiple sources (or possibly none) of evidence located in 
     a scenario.
     '''
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], initial_estimated_state = np.array([]), comms_radius = 1000, logged = True):
-        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, initial_estimated_state, comms_radius, logged)
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True):
+        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, comms_radius, logged)
         #check that the estimated state can be suitably modified to remove an observed source of evidence
-        assert issubclass(self.current_belief_map.current_belief_vector, BeliefVectorMultipleSources)
+        assert issubclass(self.current_belief_map.current_belief_vector.__class__, BeliefVectorMultipleSources)
 
     def reset(self):
         pass
@@ -139,7 +150,8 @@ class MultipleSourceDetectingGridAgent(SimpleGridAgent):
     def find_sources(self, max_no_sources):
         '''
         Given an upper limit on the number of sources available in the agent's environment, executes a control loop to locate
-        the sources, or return a given number of sources as found.
+        the sources, or return a given number of sources as found. This is not suitable for multi-agent simulations, where agents
+        should coordinate across each timestep.
         '''
         self.max_no_sources = max_no_sources
         #the locations of sources of evidence that have already been successfully located
@@ -149,61 +161,99 @@ class MultipleSourceDetectingGridAgent(SimpleGridAgent):
             #check if the source is deemed to not be present at all
             #if so, break the loop
             #This is bad practice - try and fix in future
-            if next_source.location == Vector3r(-1, -1):
+            print("next_source: ", next_source)
+            if next_source.grid_loc == Vector3r(-1, -1):
                 break
             #given the next located source, append it to the list of located sources and then 
             #modify the belief vector to set the probability of subsequent sources to be found at
             #the given location to be zero.
             self.located_sources.append(next_source)
             #
-            self.belief_map.mark_source_as_located(next_source.location)
+            self.current_belief_map.mark_source_as_located(next_source.grid_loc)
         #return the list of located sources to the user
         return self.located_sources
         
         
+class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAgent):
+    '''
+    This agent extends the simple grid agent and is designed to locate multiple sources (or possibly none) of evidence located in 
+    a scenario. It includes a battery model.
+    '''
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11):
+        #default number of battery levels is 0-10 = 11 levels
+        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, comms_radius, logged)
+        #initialize battery model.
+        self.battery_estimated_state_model = StochasticBatteryHMM(no_battery_levels)
 
-#this is the agent to use for testing with rad source
-#class SimpleGridAgentWithSources(SimpleGridAgent):
-#    '''
-#    This agent designed to explore a grid environment.
-#    '''
-#    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True, single_source = False, false_positive_rate=None, false_negative_rate=None):
-#        super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, sensor, other_active_agents, prior, comms_radius, logged, single_source, false_positive_rate, false_negative_rate)
-#        
-#    def reset(self):
-#        self.__init__(self.grid, self._initial_pos, self.move_from_bel_map_callable, self.rav_operational_height, self.agent_name, self.sensor, self.other_active_agents, self.current_belief_map.get_prior(), self.comms_radius, self._logged, self.single_source, self.false_positive_rate, self.false_negative_rate)
-#    
-#    
-#    def explore_timestep(self, other_agent_positions):
-#        '''Gets rav to explore next timestep'''
-#        greedy_move, next_pos = self.move_from_bel_map_callable(self.current_belief_map, self.current_pos_intended, self.explored_grid_locs)
-#        
-#        if greedy_move:
-#            self.no_greedy_moves += 1
-#            
-#        self.move_agent(next_pos, other_agent_positions)
-#        #get sensor reading
-#        self.current_reading = self.get_sensor_reading()
-#        
-#        #update belief map based on sensor readings - maybe it makes more sense to update based on the agent observation
-#        self.current_belief_map.update_from_prob(self.current_pos_intended, self.current_reading)
-#        #create to observation object with timestamp etc.
-#        newest_observation = AgentObservation(self.current_pos_intended, self.current_reading, self.timestep, time.time(), self.agent_name)
-#        
-#        self.log_msg_to_cmd("Newest observation: " + str(newest_observation), "debug", "cmd_line", self._logged)
-#        
-#        self.observation_manager.update_rav_obs_set(self.agent_name, [AgentObservation(self.current_pos_intended, self.current_reading, self.timestep, time.time(), self.agent_name)])
-#                
-#          #self._write_observations(self.observations_file_loc)
-#        self.update_state_for_analysis_file(self.agent_state_file_loc, self.get_agent_state_for_analysis())
-#        log_msg_to_file(self.get_agent_state_for_analysis(), "info", "state")
-#        self.update_observations_file(self.observations_file_loc, newest_observation)
-#        log_msg_to_file(get_agent_observation_for_csv(newest_observation), "info", "observations")
-#        
-#        #coordinate with other agents if possible
-#        for other_active_agent in self.other_active_agents:
-#            if self.can_coord_with_other(other_active_agent, self.comms_radius):
-#                self.coord_with_other(other_active_agent)
+    def reset(self):
+        pass
+    
+    def find_sources(self, max_no_sources):
+        '''
+        Given an upper limit on the number of sources available in the agent's environment, executes a control loop to locate
+        the sources, or return a given number of sources as found. This is not suitable for multi-agent simulations, where agents
+        should coordinate across each timestep.
+        '''
+        self.max_no_sources = max_no_sources
+        #the locations of sources of evidence that have already been successfully located
+        self.located_sources = []
+        while len(self.located_sources) < self.max_no_sources:
+            next_source = self.find_source()
+            #check if the source is deemed to not be present at all
+            #if so, break the loop
+            #This is bad practice - try and fix in future
+            print("next_source: ", next_source)
+            if next_source.grid_loc == Vector3r(-1, -1):
+                break
+            #given the next located source, append it to the list of located sources and then 
+            #modify the belief vector to set the probability of subsequent sources to be found at
+            #the given location to be zero.
+            self.located_sources.append(next_source)
+            #
+            self.current_belief_map.mark_source_as_located(next_source.grid_loc)
+        #return the list of located sources to the user
+        return self.located_sources
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class OccupancyGridAgent():
