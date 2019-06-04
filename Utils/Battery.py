@@ -219,7 +219,7 @@ class RAVBattery:
         '''Resets the RAV battery to its initial state'''
         self.__init__(self.initial_capacity)
         
-    def generate_capacity_readings_every_second(self, operational_speed):
+    def generate_capacity_readings_every_second(self, operational_speed, out_file_location = None):
         '''
         Generates an array of readings taken at 1s time intervals to be used to train battery hmm
         '''
@@ -230,7 +230,13 @@ class RAVBattery:
             if not test_battery.move_by_dist_at_speed(operational_speed, operational_speed):
                 break
             capacities.append(self.get_current_capacity())
-            print(capacities[-1])
+        if out_file_location:
+            with open(out_file_location,'w') as f_object:
+                #write the csv header
+                f_object.write('time_index' + ',' + 'battery_capacity' + '\n')
+                for time_stamp_index, capacity in enumerate(capacities):
+                    #write each line of csv
+                    f_object.write(str(time_stamp_index) + ',' + str(capacity) + '\n')
         return capacities
 
 class RAVBatteryAgent:
@@ -298,7 +304,7 @@ if __name__ == '__main__':
 #    print(test_battery.get_current_capacity())
 #    print(test_battery.get_remaining_range_at_speed(5))
 #    print(test_battery.get_remaining_range_at_speed(8))
-    data = test_battery.generate_capacity_readings_every_second(2)
+    data = test_battery.generate_capacity_readings_every_second(4, "D:\\OccupancyGrid\\Data\\BatteryData\\SimulatedBatteryData.csv")
     binned_values = [round(_ * 10 ) for _ in data]
     print(binned_values)
 #%%

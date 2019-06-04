@@ -18,7 +18,7 @@ from Utils.Vector3r import Vector3r
 from Utils.UE4Grid import UE4Grid
 from Utils.BeliefMap import BeliefMapComponent
 from Utils.BeliefMapVector import BeliefVectorMultipleSources
-from Utils.BatteryDBN import StochasticBatteryHMM
+from Utils.BatteryDBN import DefaultStochasticBatteryHMM
 
  
 class SimpleGridAgent(BaseGridAgent):
@@ -179,11 +179,11 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
     This agent extends the simple grid agent and is designed to locate multiple sources (or possibly none) of evidence located in 
     a scenario. It includes a battery model.
     '''
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11, charging_location = None):
         #default number of battery levels is 0-10 = 11 levels
         super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, comms_radius, logged)
         #initialize battery model.
-        self.battery_estimated_state_model = StochasticBatteryHMM(no_battery_levels)
+        self.battery_estimated_state_model = DefaultStochasticBatteryHMM(no_battery_levels)
 
     def reset(self):
         pass
@@ -214,7 +214,17 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
         #return the list of located sources to the user
         return self.located_sources
 
-
+    def update_battery_belief(self, observed_battery_level, position_to_move_to, recharge = False):
+        #need to include the battery model in this
+        if position_to_move_to == self.current_pos_intended:
+            if recharge: 
+                self.battery_estimated_state_model.update_estimated_state('recharge', observed_battery_level)
+            else:
+                #agent is hovering, for now assume that the battery doesn't change. 
+                
+                pass
+        else:
+            self.battery_estimated_state_model.update_estimated_state('recharge', observed_battery_level)
 
 
 
