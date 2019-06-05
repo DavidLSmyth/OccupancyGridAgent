@@ -5,3 +5,4 @@ autologging
 scipy
 matplotlib
 sklearn
+recordclass

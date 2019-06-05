@@ -89,7 +89,8 @@ class Vector3r():
         return Vector3r(np.nan, np.nan, np.nan)
     
     def __str__(self):
-        return f"Vector3r({self.x_val}, {self.y_val}, {self.z_val})"
+        #return f"Vector3r({self.x_val}, {self.y_val}, {self.z_val})"
+        return "Vector3r({}, {}, {})".format(self.x_val, self.y_val, self.z_val)
 
     def __add__(self, other):
         return Vector3r(self.x_val + other.x_val, self.y_val + other.y_val, self.z_val + other.z_val)
@@ -111,7 +112,12 @@ class Vector3r():
             
     def __eq__(self, other):
         '''3d vectors are equal if x,y,z components are all equal'''
-        return all([self.x_val == other.x_val, self.y_val == other.y_val, self.z_val == other.z_val])
+        if type(self) == type(other):
+            return all([self.x_val == other.x_val, self.y_val == other.y_val, self.z_val == other.z_val])
+        else:
+            print("other: ",other)
+            print("self: ", self)
+            raise Exception("Cannot compare {} with {}".format(self.__class__.__name__, other.__class__.__name__))
 
     def dot(self, other):
         if type(self) == type(other):

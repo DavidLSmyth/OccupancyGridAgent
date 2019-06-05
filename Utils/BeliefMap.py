@@ -8,33 +8,51 @@ Created on Tue Nov 13 11:40:27 2018
 import sys
 sys.path.append('..')
 import typing
+import math
+from recordclass import RecordClass
+from abc import abstractmethod, ABC
+import pickle
 from scipy.ndimage.filters import gaussian_filter
-import numpy as np
 import matplotlib.pyplot as plt
-#
+from bisect import bisect_left
+import numpy as np
+
 from Utils.UE4Grid import UE4Grid
 #from AirSimInterface.types import Vector3r
 from Utils.Vector3r import Vector3r
-from Utils.AgentObservation import AgentObservation#, BinaryAgentObservation
+from Utils.AgentObservation import AgentObservation, BinaryAgentObservation
 from Utils.Prior import generate_gaussian_prior, generate_uniform_prior
+from Utils.BeliefMapVector import BeliefVector, BeliefVectorMultipleSources
 
 #calculation of posterior distribution is bayes likelihood update formula
 #This is the posterior distribution of a single sensor reading, independent of all other sensor readings
 #calc_posterior = lambda observation, prior: (prior * observation) / ((prior * observation) + (1-prior)*(1-observation))
-def calc_posterior(observation, prior):
-    numerator = (prior * observation)
-    denominator = ((prior * observation) + (1-prior)*(1-observation))
-    #if denominator == 0:
-        #this is a quick and easy solution, should use log odds to solve this properly
-    #    denominator = 0.0000000000000001
-    return numerator / denominator
+#def calc_posterior(observation, prior):
+#    numerator = (prior * observation)
+#    denominator = ((prior * observation) + (1-prior)*(1-observation))
+#    if denominator == 0:
+#        #this is a quick and easy solution, should use log odds to solve this properly
+#        denominator = 0.0000000000000001
+#    
+#    return numerator / denominator
+
+def calc_posterior_from_binary_observation(observation_reading: float, prior, false_positive_rate, false_negative_rate):
+    '''
+    Given a binary sensor reading, calculates p(x_t = a | observation). Assumes all grid cells are independent. Only the cell at which observation reading is made
+    is updated
+    '''
+    if observation_reading == 1:
+        return(1-false_negative_rate) * prior /((prior * (1 - false_negative_rate)) + (1-prior)*(false_positive_rate))
+    else:
+        return(false_negative_rate) * prior /((prior * (false_negative_rate)) + (1-prior)*(1-false_positive_rate))
+
 
 #This calculates the posterior distribution of detection of a source in the grid to be explored, 
 #where there is no independence between grid cells
 #need to know sensor sensitivity, prior and probability of false positive/false negative
 def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior):
     '''
-    As outlined in A Decision-Making Framework for Control Strategies in Probabilistic Search, all grid cell probabilities are updated 
+    As outlined in "A Decision-Making Framework for Control Strategies in Probabilistic Search", all grid cell probabilities are updated 
     whenever an observation is made in any grid cell. This function returns the posterior probability of the source being present in a 
     single grid cell having made an observation (possibly in another grid cell)
     '''
@@ -53,51 +71,110 @@ def _calc_posterior_given_sensor_sensitivity(agent_observation_probability: floa
             numerator = (1-alpha) * prior
     return numerator/denominator
 
-def _calc_posterior_from_sensor(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha, beta):
-    
+
+def calculate_binary_sensor_probability(reading_value, reading_location, agent_location, fpr, fnr):
+    '''Calculates p(current reading | current state), where state is made up of the agents location'''
+    if reading_location == agent_location:
+        if reading_value == 1:
+            return 1 - fnr
+        else:
+            return fnr
+    else:
+        if reading_value == 1:
+            return fpr
+        else:
+            return 1-fpr
+        
+def calculate_normalizing_constant():
+    pass
+
+def _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, fpr, fnr):
+    '''
+    Given a binary sensor model (sensor either returns detected or not detected) which outlines the probability of detecting false positives/false negatives, 
+    calculates the posterior probability of observing the value that you did.
+    '''
+    if observation_value not in [0,1]:
+        raise NotImplementedError("This model is only suitable for a binary sensor reading")
     grid_cell_location_condition = observation_cell_loc != update_cell_loc
     observation_reading_condition = observation_value == 1
-    numerator = grid_cell_to_update_prior
+    numerator = grid_cell_to_update_prior * calculate_binary_sensor_probability(observation_value, observation_cell_loc, update_cell_loc, fpr, fnr)
     #ordered by most likely to least likely
     if observation_value == 0 and grid_cell_location_condition:
-        numerator = (1 - alpha) * numerator
-        denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((beta) * observation_grid_loc_prior)
+        #numerator = (1 - alpha) * numerator
+        denominator = ((1 - alpha) * (1 - observation_grid_loc_prior)) + ((fnr) * observation_grid_loc_prior)
         
     elif observation_value == 1 and grid_cell_location_condition:
-            numerator = (alpha) * numerator
-            denominator = ((alpha) * (1 - observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)    
+            #numerator = (alpha) * numerator
+            denominator = ((fpr) * (1 - observation_grid_loc_prior)) + ((1 - fnr) * observation_grid_loc_prior)    
             
     elif observation_value == 1 and not grid_cell_location_condition:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = (1 - beta) * numerator
-        denominator = ((alpha) * (1-observation_grid_loc_prior)) + ((1 - beta) * observation_grid_loc_prior)
+        #numerator = (1 - beta) * numerator
+        denominator = ((fpr) * (1-observation_grid_loc_prior)) + ((1 - fnr) * observation_grid_loc_prior)
         
     elif observation_value == 0 and not grid_cell_location_condition:
         assert grid_cell_to_update_prior == observation_grid_loc_prior
-        numerator = beta * numerator
-        denominator = ((1 - alpha) * (1-observation_grid_loc_prior)) + (beta * observation_grid_loc_prior)
+        #numerator = beta * numerator
+        denominator = ((1 - fpr) * (1-observation_grid_loc_prior)) + (fnr * observation_grid_loc_prior)
         
     else:
         raise Exception("Cannot calculate posterior when sensor readings are not 0 or 1. You provided value {}".format(observation_value))
         
     return numerator / denominator
 
+    
+    
+    
 #wrapper method for above given an agent observation rather than a probability and recorded grid location
-def calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, observation_value: int, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, alpha: float, beta: float):
+def calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_prior: float, grid_cell_to_update_prior: float, reading: float, observation_cell_loc: Vector3r, update_cell_loc: Vector3r, fpr: float, fnr: float):
     '''
     As outlined in A Decision-Making Framework for Control Strategies in Probabilistic Search, all grid cell probabilities are updated 
     whenever an observation is made in any grid cell. This function returns the posterior probability of the source being present in a 
-    single grid cell having made an observation (possibly in another grid cell)
+    single grid cell having made an observation (possibly in another grid cell).
     '''
-    return _calc_posterior_from_sensor(observation_grid_loc_prior, grid_cell_to_update_prior, observation_value, observation_cell_loc, update_cell_loc, alpha, beta)
+    if not reading in [0,1]:
+        raise NotImplementedError("Please provide an agent observation of the type BinaryAgentObservation")
+    return _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior, grid_cell_to_update_prior, reading, observation_cell_loc, update_cell_loc, fpr, fnr)
+#
+#def calc_single_source_posterior_given_sensor_sensitivity(belief_map, observation):
+#    if not isinstance(observation, BinaryAgentObservation):
+#        raise NotImplementedError("Please provide an agent observation of the type BinaryAgentObservation")
+#    observation_location = observation.grid_loc
+#    observation_location_prior = belief_map.prior[observation_location]
+#    for grid_cell in 
+#    return _calc_posterior_from_binary_sensor_model(observation_grid_loc_prior, grid_cell_to_update_prior, observation_value.reading, observation_cell_loc, update_cell_loc, alpha, beta)
+
+
+#%%
+
+#implementing this might help keep the belief map decoupled from it's update rule
+#class BeliefMapUpdate:
+#    '''
+#    Given a belief map, returns the posterior given observations (assuming actions are deterministic)
+#    '''
+#    def __init__(self, single_cell_update):
+#        #single cell update should give the update rule for each cell in the belief map
+#        if not '__call__' in dir(single_cell_update):
+#            raise NotImplementedError("The single_cell_update rule must implement the __call__ method")
+#        self.single_cell_update = single_cell_update
+#        
+#    def __call__(self, belief_map, observation):
+#        for belief_map_component in belief_map:
+#            self.single_cell_update(belief_map_component, observation)
+#        
+
 
 #%%
 #A belief map component consists of a grid location and a likelihood
-_BeliefMapComponent = typing.NamedTuple('belief_map_component', 
-                                [('grid_loc',Vector3r),
-                                 ('likelihood', float)]
-                                )
-
+#this is deprecated because namedtuples are immutable - when updating the belief map, want mutable components
+#_BeliefMapComponent = typing.NamedTuple('belief_map_component', 
+#                                [('grid_loc',Vector3r),
+#                                 ('likelihood', float)])
+#%%
+class _BeliefMapComponent(RecordClass):
+    '''Represents P(source = location | evidence from time = 1 to t)'''
+    grid_loc: Vector3r
+    likelihood: float
 #%%
 class BeliefMapComponent(_BeliefMapComponent):
     '''A wrapper class of BeliefMapComponent to enforce correct data types'''
@@ -115,6 +192,9 @@ class BeliefMapComponent(_BeliefMapComponent):
 #        print("Dtypes: ",[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _BeliefMapComponent.__annotations__.values())])
         return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _BeliefMapComponent.__annotations__.values())])
 
+    def set_likelihood(self, new_likelihood):
+        self.likelihood = new_likelihood
+        
 #%%
 def get_posterior_given_obs(observations:list, prior):
     '''For a sequence of observations calculates the posterior probability given a prior.
@@ -155,35 +235,57 @@ def get_lower_and_upper_confidence_given_obs(observations: typing.List[AgentObse
     return get_lower_confidence_given_obs(observations), get_upper_confidence_given_obs(observations)
 
 #%%
-#######################  Belief map and tests  #######################
-class ContinuousBeliefMap:
-    '''Based on either discrete belief map or interpolation of continuous measurements'''
-    def __init__(self, xmin, xmax, ymin, ymax):
-        pass
+
         
 #######################  Belief map and tests  #######################
 #A belief map has an agent name (beliefs belong to an agent) consists of belief map components
 #Leave this as namedtuple if don't need to define methods
-class BeliefMap:
-    '''Add method to create a continuous belief map'''
-    def __init__(self, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], apply_blur = False):
-        '''apply_blur applies a gaussian blue to the belief map on each update to provide a more continuous distribution of belief map values'''
+class BaseBeliefMap(ABC):
+    
+    '''
+    Add method to create a continuous belief map. Concrete BeliefMap classes are coupled with their update rules.
+    '''
+    
+    def __init__(self, grid: UE4Grid, initial_state: np.array, fpr, fnr):
+        
+        '''
+        Prior is assumed to be in same order as grid locations. Initial val of source not being present is assumed
+        to be passed in (should be constructed from one of the functions in prior.py)
+        '''
+        
         #self.agent_name = agent_name
         self.grid = grid
-        self.belief_map_components = belief_map_components
-        self.prior = prior
-        self.apply_blur = apply_blur
+        self.fpr = fpr
+        self.fnr = fnr
+        
+        #initial_state = np.array([prior[grid_point] for grid_point in grid.get_grid_points()])
+        #initial_state = np.append(prior, 1-prior.sum())
+        
+        #the mapping between belief at individual grid points and their location in teh belief state
+        #vector is 1-1
+        self.current_belief_vector = BeliefVector(grid.get_grid_points(), initial_state, fpr, fnr)
+        #self.belief_map_components.append(filter(lambda belief_map_component: belief_map_component.grid_loc == grid_loc, belief_map_components).__next__())
+        self.prior = initial_state
+        #self.apply_blur = apply_blur
         
         #create a cache of probability updates based on grid size - e.g. for n observations, 
     
-    def get_prior(self)->typing.Dict[Vector3r, float]:
+    def get_prior(self)->np.array:
         return self.prior
     
     def get_grid(self)->UE4Grid:
         return self.grid
             
     def get_belief_map_components(self):
-        return self.belief_map_components
+        return [BeliefMapComponent(loc, likelihood) for loc, likelihood in zip(self.grid.get_grid_points(), self.current_belief_vector.estimated_state)]
+    
+    def get_pickle(self):
+        return pickle.dumps(self)
+    
+    def pickle_to_file(self, file_loc):
+        '''Saves belief map object to file. Useful because updates can take quite a long time to occur'''
+        with open(file_loc, 'wb') as f:
+            pickle.dump(self, f)
     
     def set_apply_blur(self, apply_blur):
         self.apply_blur = apply_blur
@@ -194,59 +296,118 @@ class BeliefMap:
     def _get_current_likelihood_at_loc(self, grid_loc):
         return self.get_belief_map_component(grid_loc).likelihood
     
-    def update_from_prob(self, grid_loc, obs_prob):
-        '''Updates likelihodd at grid location given a grid location and observation'''
-        prior_val = self._get_current_likelihood_at_loc(grid_loc)
-        self.belief_map_components[self._get_observation_grid_index(grid_loc)] = BeliefMapComponent(grid_loc, get_posterior_given_obs([obs_prob], prior_val))
-        if self.apply_blur:
-            self.apply_gaussian_blur()
-        
+#    @abstractmethod
+#    def _update_from_prob(self, grid_loc, obs_prob):
+#        '''Updates likelihodd at grid location given a grid location and observation'''
+#        pass        
+#        prior_val = self._get_current_likelihood_at_loc(grid_loc)
+#        self.belief_map_components[self._get_observation_grid_index(grid_loc)] = BeliefMapComponent(grid_loc, get_posterior_given_obs([obs_prob], prior_val))
+#        if self.apply_blur:
+#            self.apply_gaussian_blur()
+#   
+    @abstractmethod
+    def _update_grid_component_from_observation(self, belief_map_component, agent_observation):
+        '''
+        Updates a individual component in the belief map given an observation(percept).
+        '''
+        pass
+    
+    def _update_map_from_observation(self, agent_observation):
+        '''
+        The belief map update rule given an agent observation(percept). In derived classes it could be the case that this function is overridden
+        for optimization reasons.
+        '''
+        for belief_map_component in self.get_belief_map_components():
+            self._update_grid_component_from_observation(belief_map_component, agent_observation)
+    
     def update_from_observation(self, agent_observation: AgentObservation):
-        self.update_from_prob(agent_observation.grid_loc, agent_observation.probability)
+        self._update_map_from_observation(agent_observation)
         
     def update_from_observations(self, agent_observations: typing.Set[AgentObservation]):
         for observation in agent_observations:
-            self.update_from_observation(observation)
+            self._update_map_from_observation(observation)
     
     def _get_observation_grid_index(self, grid_loc: Vector3r):
         return self.belief_map_components.index(self.get_belief_map_component(grid_loc))
     
-    def get_belief_map_component(self, grid_loc):
-        if grid_loc in map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components):
-            return next(filter(lambda belief_map_component: belief_map_component.grid_loc == grid_loc, self.belief_map_components))
+    def get_belief_map_component(self, grid_location):
+        '''Returns the belief map component at the specified grid location'''
+        #since grid locations are ordered, can do this via binary search
+        grid_loc_indices = [g_point.x_val + (g_point.y_val * self.grid.get_no_grid_points()) for g_point in self.grid.get_grid_points()]
+        grid_location_index = grid_location.x_val + (grid_location.y_val * self.grid.get_no_grid_points())
+        location = bisect_left(grid_loc_indices, grid_location_index)
+        if self.grid.get_grid_points()[location] == grid_location:
+            return BeliefMapComponent(grid_location, self.current_belief_vector.estimated_state[location])
+#        if grid_loc in map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components):
+#            return next(filter(lambda belief_map_component: belief_map_component.grid_loc == grid_loc, self.belief_map_components))
         else:
-            print(list(map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components)))
-            print(grid_loc in list(map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components)))
+            #print(list(map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components)))
+            #print(grid_loc in list(map(lambda belief_map_component: belief_map_component.grid_loc ,self.belief_map_components)))
             raise Exception("{} is not in the belief map".format(grid_loc))
             
-    def save_visualisation(self, filepath):
+            
+    def save_visualisation(self, filepath, true_source_locations = []):
+        '''Saves the visualisation as a png at the specified filepath'''
         fig = plt.figure()
         ax = fig.gca(projection='3d')
         X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
         Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
-        Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
-        ax.set_zlim3d(0,1)
+        Z = self.current_belief_vector.get_estimated_state()[:-1]
+        #X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
+        #Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
+        #Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
+        #ax.set_zlim3d(0,Z.max()*1.02)
+        ax.set_zlim3d(0,16/self.grid.get_no_grid_points())
         ax.plot_trisurf(X, Y, Z)
+        true_source_locations = [Vector3r(2,4), Vector3r(5,7)]
+
+        ax.scatter(list(map(lambda coord: coord.x_val, true_source_locations)), list(map(lambda coord: coord.y_val, true_source_locations)),
+                     [1/self.grid.get_no_grid_points() for _ in range(len(true_source_locations))], c = "red")
         plt.savefig(filepath)
+        plt.close(fig)        
+    
+    def show_visualisation(self):
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+        X = list(map(lambda coord: coord.x_val, self.grid.get_grid_points()))
+        Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
+        Z = self.current_belief_vector.get_estimated_state()[:-1]
+        #Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
+        ax.set_zlim3d(0,Z.max()*1.02)
+        ax.plot_trisurf(X, Y, Z)
+        plt.show()
     
     def get_most_likely_component(self):
         '''Returns the belief map component that has the highest likelihood of containing the source'''
-        return max([component for component in self.belief_map_components], key = lambda component: component.likelihood)
+        #return max([component for component in self.belief_map_components], key = lambda component: component.likelihood)
+        #print("Most likely component: {}".format(self.current_belief_vector.get_estimated_state().max()))
+        self.current_belief_vector.get_estimated_state().max()
     
     def get_ith_most_likely_component(self, i):
-        '''Returns the belief map component that has the highest likelihood of containing the source'''
-        return sorted([component for component in self.belief_map_components], key = lambda component: component.likelihood)[i-1] # i-1 necessary for zero-indexed lists
+        '''
+        Returns the belief map component that has the highest likelihood of containing the source.
+        This excludes the state that the source is not present in the environment.
+        '''
+        #take negative to sort in descending order
+        sorted_element = np.argsort(-self.current_belief_vector.get_estimated_state())[i-1]
+        if sorted_element < self.grid.get_no_grid_points():
+            return BeliefMapComponent(self.grid.get_grid_points()[sorted_element], self.current_belief_vector.get_estimated_state()[sorted_element])
+        else:
+            #This is really poor design - this represents the state in which the source is not present
+            return BeliefMapComponent(Vector3r(-1, -1), self.current_belief_vector.get_estimated_state()[-1])
+
+        #return sorted([component for component in self.belief_map_components], key = lambda component: component.likelihood)[i-1] # i-1 necessary for zero-indexed lists
     
     #experimental - shouldn't need to use this in Chung & Burdick framework since bayesian filtering consists of a prediction and smoothing step already.
-    def apply_gaussian_blur(self, blur_radius = None):
-        '''Idea is that grid locations are not independent, and the joint distribution should be continuous. Apply a smoother in order to 
-        prevent large discontinuities. This is addressed properly in the paper "Learning Occupancy Grids with Forward Models. (http://robots.stanford.edu/papers/thrun.iros01-occmap.pdf)'''
-        if not blur_radius:
-            blur_radius = int(0.15 * len(self.get_grid().get_grid_points()))
-        bel_map_locations = [grid_comp.grid_loc for grid_comp in self.get_belief_map_components()]
-        grid_array = np.array([grid_comp.likelihood for grid_comp in self.get_belief_map_components()]).reshape([self.grid.get_no_points_x(),self.grid.get_no_points_y()])
-        blurred = gaussian_filter(grid_array, sigma = blur_radius)
-        self.set_belief_map_components([BeliefMapComponent(bel_map_location, likelihood) for bel_map_location, likelihood in zip(bel_map_locations, blurred.ravel())])
+#    def apply_gaussian_blur(self, blur_radius = None):
+#        '''Idea is that grid locations are not independent, and the joint distribution should be continuous. Apply a smoother in order to 
+#        prevent large discontinuities. This is addressed properly in the paper "Learning Occupancy Grids with Forward Models. (http://robots.stanford.edu/papers/thrun.iros01-occmap.pdf)'''
+#        if not blur_radius:
+#            blur_radius = int(0.15 * len(self.get_grid().get_grid_points()))
+#        bel_map_locations = [grid_comp.grid_loc for grid_comp in self.get_belief_map_components()]
+#        grid_array = np.array([grid_comp.likelihood for grid_comp in self.get_belief_map_components()]).reshape([self.grid.get_no_points_x(),self.grid.get_no_points_y()])
+#        blurred = gaussian_filter(grid_array, sigma = blur_radius)
+#        self.set_belief_map_components([BeliefMapComponent(bel_map_location, likelihood) for bel_map_location, likelihood in zip(bel_map_locations, blurred.ravel())])
     
     def __eq__(self, other):
         #check if grids are the same an componenents are the same
@@ -303,94 +464,111 @@ class BeliefMap:
         denominator =  prior_at_grid_cell - ((prior_at_grid_cell-1) * (((1-alpha)/beta)**no_timesteps))
         return numerator/denominator
     
-    
-class ChungBurdickBeliefMap(BeliefMap):
+#%%
+class SingleSourceBinaryBeliefMap(BaseBeliefMap):
     
     '''
     An occupancy grid with single source based on the paper:
-    A Decision-Making Framework for Control Strategies in Probabilistic Search
+    A Decision-Making Framework for Control Strategies in Probabilistic Search. It is just a regular belief
+    map with the update rule specific to a single source. Observations must be provided as positive or 
+    negative detections at a given grid location.
     '''
     
+    def __init__(self, grid: UE4Grid, initial_distribution: np.array, fpr: 'prob of false pos', fnr: 'prob of false neg'):
+        super().__init__(grid, initial_distribution, fpr, fnr)
+
+        
+    def _update_map_from_observation(self, agent_observation: AgentObservation):
+        '''
+        Updates an individual component in the belief map given an observation(percept).
+        '''
+        if not isinstance(agent_observation, BinaryAgentObservation):
+            raise NotImplementedError("Cannot update a non-binary observation")
+        #self._update_from_prob_optimized(agent_observation.grid_loc, agent_observation.reading)
+        self.current_belief_vector.update(agent_observation.grid_loc, agent_observation.reading)
+        
+    def _update_map_from_observations(self, agent_observations: typing.List[AgentObservation]):
+        for agent_observation in agent_observations:
+            self._update_map_from_observation(agent_observation)
+        
+    def _update_grid_component_from_observation(self, agent_observation: AgentObservation):
+        pass
+        
+#    def _update_from_prob_optimized(self, observation_grid_loc, reading):
+#        '''Updated probability, optimized using local variables and map'''
+#        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
+#
+#        def calc_posterior_given_sensor_sensitivity_inner(grid_loc_to_update):
+#            return calc_single_source_posterior_given_sensor_sensitivity(observation_grid_loc_prior, self.get_belief_map_component(grid_loc_to_update).likelihood, reading, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
+#        
+#        new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
+#        for belief_map_component, new_belief in zip(self.belief_map_components, new_beliefs):
+#            belief_map_component.set_likelihood(new_belief)
+##        self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs)]
+
+
+            
+    def get_probability_source_in_grid(self):
+        return self.current_belief_vector.get_prob_in_grid()
+        #return sum([belief_map_component.likelihood for belief_map_component in self.belief_map_components])
+        
+#%%
+class MultipleSourceBinaryBeliefMap(SingleSourceBinaryBeliefMap):
+    
+    '''
+    This class is exactly the same as SingleSourceBinaryBeliefMap with the only difference being
+    that the estimated state can be modified to eliminate the probability of a previous 
+    located source being included in the updates to the next source detection.
+    
+    Prior is assumed to be in direct correspondence with the grid location indices and does not include
+    the prior probability of a source not being present.
+    '''
+    
+    def __init__(self, grid: UE4Grid, initial_distribution: np.array, sensor_model_fpr: 'prob of false pos', sensor_model_fnr: 'prob of false neg'):       
+        #the mapping between belief at individual grid points and their location in teh belief state
+        #vector is 1-1
+        super().__init__(grid, initial_distribution, sensor_model_fpr, sensor_model_fnr)
+        self.current_belief_vector = BeliefVectorMultipleSources(grid.get_grid_points(), initial_distribution, sensor_model_fpr, sensor_model_fnr)
+
+    def mark_source_as_located(self, location: Vector3r):
+        '''
+        In the state estimate related to the location of a source of evidence, modifies the probability value at the
+        location to be zero and redistributes it's probability mass equally among all other locations.
+        All subsequent updates will still yield a zero probability of the source being at the location
+        that has been marked as discovered.
+        '''
+        self.current_belief_vector.set_location_prob_to_zero(location)
+        
+
+#%%
+class IndependenceAssumptionBeliefMap(BaseBeliefMap):
+    '''
+    Assuming that grid cells are independent of each other, maintain individual pdf for each grid cell.
+    '''
     def __init__(self, grid: UE4Grid, belief_map_components: typing.List[BeliefMapComponent], prior: typing.Dict[Vector3r, float], alpha: 'prob of false pos', beta: 'prob of false neg', apply_blur = False):
         super().__init__(grid, belief_map_components, prior, apply_blur)
         self.alpha = alpha
         self.beta = beta
         #record the evolution of belief
-        self.belief_evolution = [sum(prior.values())]
-        
-#    def update_from_observation(self, agent_observation: 'BinaryAgentObservation'):
-#        '''Updates all likelihoods based on observation'''
-#        for grid_loc in self.grid.get_grid_points():
-#            prior_val = self._get_current_likelihood_at_loc(grid_loc)
-#            #agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior):
-#            new_belief_value = calc_posterior_given_sensor_sensitivity(agent_observation, grid_loc, self.alpha, self.beta, prior_val)
-#            self.belief_map_components[self._get_observation_grid_index(grid_loc)] = BeliefMapComponent(grid_loc, new_belief_value)
-#        
-#        if self.apply_blur:
-#            self.apply_gaussian_blur()
-        
-        
-    def _update_from_prob_optimized(self, observation_grid_loc, obs_prob):
-        '''Updated probability, optimized using local variables and map'''
-        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
 
-        def calc_posterior_given_sensor_sensitivity_inner(grid_loc_to_update):
-            return calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, self.get_belief_map_component(grid_loc_to_update).likelihood, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
-        
-        new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
-        self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs)]
-        
-    def _update_from_prob_optimized_numpy(self, observation_grid_loc, obs_prob):
-        '''Updated probability, optimized using local variables and map'''
-        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
-        grid_points_array = np.array(self.grid.get_grid_points())
-        #likelihoods = np.array([self.get_belief_map_component(grid_loc_to_update).likelihood] for grid_loc_to_update in grid_points_array)
-        def calc_posterior_given_sensor_sensitivity_inner(grid_loc_to_update):
-            return calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, self.get_belief_map_component(grid_loc_to_update).likelihood, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
-        
-        #new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
-        new_beliefs_vectorized = np.vectorize(calc_posterior_given_sensor_sensitivity_inner)
-        new_beliefs = new_beliefs_vectorized(grid_points_array)
-        #new_beliefs = map(calc_posterior_given_sensor_sensitivity_inner, self.grid.get_grid_points())
-        self.belief_map_components = [BeliefMapComponent(grid_loc_to_update, new_belief_value) for grid_loc_to_update, new_belief_value in zip(self.grid.get_grid_points(), new_beliefs.tolist())]
-        
-    def update_from_prob(self, observation_grid_loc, obs_prob):
+    def _update_grid_component_from_observation(self, belief_map_component, agent_observation: AgentObservation):
         '''
-        Updates likelihood at all grid locations given a grid location and observation. Mult-processing might offer a nice speedup.
+        Updates a individual component in the belief map given an observation(percept).
         '''
-        self._update_from_prob_optimized(observation_grid_loc, obs_prob)
-        #self._update_from_prob_deprecated(observation_grid_loc, obs_prob)
-    
-    #too slow! use update_from_prob_optimized instead
-    def _update_from_prob_deprecated(self, observation_grid_loc, obs_prob):
-        '''
-        Updates likelihood at all grid locations given a grid location and observation. Mult-processing this would offer a nice speedup.
-        '''
-        
-        observation_grid_loc_prior = self._get_current_likelihood_at_loc(observation_grid_loc)
-        #this is really slow...
-        for grid_loc_to_update in self.grid.get_grid_points():
-            #prior_val_update_cell = self._get_current_likelihood_at_loc(grid_loc)
-            #_calc_posterior_given_sensor_sensitivity(agent_observation_probability: float, agent_observation_grid_loc: Vector3r, location: Vector3r, alpha: 'prob of false pos', beta: 'prob of false neg', prior)
-            #new_belief_value = _calc_posterior_given_sensor_sensitivity(obs_prob, observation_grid_loc, grid_loc, self.alpha, self.beta, prior_val_update_cell, prior_val_measurement_cell)
-            
-            grid_cell_to_update_prior = self.get_belief_map_component(grid_loc_to_update).likelihood
-            #this could be made to be more efficient - having some kind of cache that stores in advance the updates to the map given a sequence of observations could
-            #be beneficial but might not be possible with non-uniform prior
-            new_belief_value = calc_posterior_given_sensor_sensitivity(observation_grid_loc_prior, grid_cell_to_update_prior, obs_prob, observation_grid_loc, grid_loc_to_update, self.alpha, self.beta)
-            
-            self.belief_map_components[self._get_observation_grid_index(grid_loc_to_update)] = BeliefMapComponent(grid_loc_to_update, new_belief_value)        
+        pass
 
-        if self.apply_blur:
-            self.apply_gaussian_blur()
-#    
-            
-    def get_probability_source_in_grid(self):
-        return sum([belief_map_component.likelihood for belief_map_component in self.belief_map_components])
-        
+    def _update_map_from_observation(self, agent_observation: AgentObservation):
+        '''
+        Updates a individual component in the belief map given an observation(percept).
+        '''
+        #assuming all grid locations are independent of each other
+        component_to_update = self.get_belief_map_component(agent_observation.grid_loc)
+        component_to_update.likelihood = calc_posterior_from_binary_observation(agent_observation.reading, component_to_update.likelihood, self.alpha, self.beta)
 
 
 #%%
+        
+#This makes invalid assumptions regarding the distribution, should be ignored
 class ConfidenceIntervalBeliefMap:
     '''Can be used to calculate upper and lower confidence intervals on parameter estimation'''
     
@@ -445,55 +623,59 @@ class ConfidenceIntervalBeliefMap:
     
 #%%
 #maybe this should go in contsructor and make regular class
-def create_belief_map(grid, prior = {}):
-    '''Creates an occupancy belief map for a given observer and a set of grid locations.
-    Prior is a mapping of grid_points to probabilities'''
-    if not prior:
-        #use uniform uninformative prior
-        prior = generate_uniform_prior(grid, initial_belief_sum = 1)
-    return BeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior)
-    #return {grid_locs[i]: ObsLocation(grid_locs[i],prior[i], 0, time.time(), observer_name) for i in range(len(grid_locs))}
+#def create_belief_map(grid, prior = {}):
+#    '''Creates an occupancy belief map for a given observer and a set of grid locations.
+#    Prior is a mapping of grid_points to probabilities'''
+#    if not prior:
+#        #use uniform uninformative prior
+#        prior = generate_uniform_prior(grid, initial_belief_sum = 1)
+#    return BeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior)
+#    #return {grid_locs[i]: ObsLocation(grid_locs[i],prior[i], 0, time.time(), observer_name) for i in range(len(grid_locs))}
 
-def create_single_source_belief_map(grid, prior = {}, alpha = 0.2, beta = 0.1):
+
+def create_single_source_binary_belief_map(grid, prior: np.array, fpr = 0.2, fnr = 0.1):
     '''Creates an occupancy belief map for a given observer and a set of grid locations.
     Prior is a mapping of grid_points to probabilities'''
-    if not prior:
+    if prior.size == 0:
         #use uniform uninformative prior
         #in this case want all probabilities to add up to 1/2 to indicate maximum uncertainty
         prior = generate_uniform_prior(grid, initial_belief_sum = 0.5)
-    return ChungBurdickBeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior, alpha, beta)
+    return SingleSourceBinaryBeliefMap(grid, prior, fpr, fnr)
 
-def create_confidence_interval_belief_map(grid, prior = {}):
-    if not prior: 
+def create_multiple_source_binary_belief_map(grid, prior: np.array, fpr = 0.2, fnr = 0.1):
+    if prior.size == 0:
+        prior = generate_uniform_prior(grid, initial_belief_sum = 1)
+    return MultipleSourceBinaryBeliefMap(grid, prior, fpr, fnr)
+
+def create_confidence_interval_belief_map(grid, prior: np.array):
+    if prior.size == 0: 
         prior = generate_uniform_prior(grid, initial_belief_sum = 1)
     return ConfidenceIntervalBeliefMap(grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()])
 #%%
-def create_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], agent_belief_map_prior: typing.Dict[Vector3r, float] = {}):
+
+
+def create_single_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], fpr, fnr, agent_belief_map_prior: np.array = np.array([])):
     '''Since the calculation of posterior likelihood is based only on prior and observations (independent of order), updating a belief map component from measurements can be done 
     by the following update formula: 
                                 prior * product(over all i observations) observation_i
         ----------------------------------------------------------------------------------------------------------------------
         prior * product(over all i observations) observation_i + (1-prior) * product(over all i observations) (1-observation_i)
     '''
-    if agent_belief_map_prior:
-        return_bel_map = create_belief_map(grid, agent_belief_map_prior)
-    else:
-        return_bel_map = create_belief_map(grid)
+    #if initial belief not provided, default uniform is used
+    return_bel_map = create_single_source_binary_belief_map(grid, agent_belief_map_prior, fpr, fnr)
     #update belief map based on all observations...
     return_bel_map.update_from_observations(agent_observations)
     return return_bel_map
 
-def create_single_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], agent_belief_map_prior: typing.Dict[Vector3r, float] = {}):
+def create_multiple_source_belief_map_from_observations(grid: UE4Grid, agent_observations: typing.Set[AgentObservation], fpr, fnr, agent_belief_map_prior: np.array = np.array([])):
     '''Since the calculation of posterior likelihood is based only on prior and observations (independent of order), updating a belief map component from measurements can be done 
     by the following update formula: 
                                 prior * product(over all i observations) observation_i
         ----------------------------------------------------------------------------------------------------------------------
         prior * product(over all i observations) observation_i + (1-prior) * product(over all i observations) (1-observation_i)
     '''
-    if agent_belief_map_prior:
-        return_bel_map = create_single_source_belief_map(grid, agent_belief_map_prior)
-    else:
-        return_bel_map = create_single_source_belief_map(grid)
+    #if initial belief not provided, default uniform is used
+    return_bel_map = create_multiple_source_binary_belief_map(grid, agent_belief_map_prior, fpr, fnr)
     #update belief map based on all observations...
     return_bel_map.update_from_observations(agent_observations)
     return return_bel_map
@@ -507,21 +689,14 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
     return return_bel_map
 
 
+
 #%%
 if __name__ == "__main__":
-
-#    #A belief map component consists of a grid location and a likelihood
-#    _BeliefMapComponent = typing.NamedTuple('belief_map_component', 
-#                                [('grid_loc',Vector3r),
-#                                 ('likelihood', float)]
-#                                )
-#    class BeliefMapComponent(_BeliefMapComponent):
-#        '''A wrapper class of BeliefMapComponent to enforce correct data types'''
-#        def __new__(cls, grid_loc, likelihood) -> '_BeliefMapComponent':
-#            #does it make sense to just leave args in the constructor and let the return line handle an incorrect number of args
-#            args = (grid_loc,likelihood)
-#            return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _BeliefMapComponent.__annotations__.values())])
-
+    
+    #%%
+   
+    
+    
     #%%
     test_grid_loc = Vector3r(10,20)
     test_grid_loc1 = Vector3r(float(10.0),float(20.0))
@@ -534,125 +709,101 @@ if __name__ == "__main__":
     assert y.grid_loc == Vector3r(float(10), float(20))
     assert z.grid_loc == Vector3r(float(10), float(20))
     
-    #tests for calc_posterior
-    assert abs(calc_posterior(0.5, 0.2) - 0.2) <= 0.001
-    assert abs(calc_posterior(0.8, 0.2) - 0.5) <= 0.001
-    
-    print(get_posterior_given_obs([0.4,0.7,0.93], 0.5))
-    #tests for get_posterior_given_obs
-    assert abs(get_posterior_given_obs([0.5,0.2,0.8], 0.5) - 0.5) <= 0.001
     
     #%%
     #tests for belief map
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 10, 6)
-    test_map = create_belief_map(test_grid)
-    
-    assert all([prior_val == 1/len(test_grid.get_grid_points()) for prior_val in test_map.prior.values()])
-    assert test_map.get_belief_map_component(Vector3r(0,0)) == BeliefMapComponent(Vector3r(0,0), 1/len(test_grid.get_grid_points()))
-    
-    test_map.update_from_prob(Vector3r(0,0), 0.9)
-    assert test_map.get_belief_map_component(Vector3r(0,0)).likelihood == calc_posterior(1/len(test_grid.get_grid_points()), 0.9)
-    
-    #%%
-    del test_map
-    #prove order in which observations come in doesn't matter
-    obs1 = AgentObservation(Vector3r(1.0,2,0),0.4, 1, 1234, 'agent1')
-    obs2 = AgentObservation(Vector3r(1,2),0.7, 2, 1235, 'agent1')
-    obs3 = AgentObservation(Vector3r(1,2.0,0),0.93, 3, 1237, 'agent1')
-    test_map = create_belief_map(test_grid)
-    
-    assert obs1.grid_loc == Vector3r(float(1), float(2))
-    assert test_map.get_belief_map_component(Vector3r(1.0,2,0)).likelihood == 1/len(test_grid.get_grid_points())
-    test_map.update_from_observation(obs1)
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs1.probability, 1/len(test_grid.get_grid_points()))
+    delta = 1/(2*len(test_grid.get_grid_points()))
+    test_map = create_single_source_binary_belief_map(test_grid, np.append(np.array([delta for _ in range(test_grid.get_no_grid_points())]), 1- (delta) * test_grid.get_no_grid_points()))
+    test_map.current_belief_vector.get_estimated_state()
+    #check prior values    
+    assert all([math.isclose(prior_val,1/(2*len(test_grid.get_grid_points())), rel_tol = 0.0001) for prior_val in test_map.prior[:-1]])
+    assert math.isclose(test_map.get_belief_map_component(Vector3r(0,0)).likelihood,BeliefMapComponent(Vector3r(0,0), 1/(2*len(test_grid.get_grid_points()))).likelihood, rel_tol = 0.0001)
+    assert test_map.get_belief_map_component(Vector3r(0,0)).grid_loc == BeliefMapComponent(Vector3r(0,0), 1/(2*len(test_grid.get_grid_points()))).grid_loc
 
-    obs2_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
-    test_map.update_from_observation(obs2)
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs2.probability, obs2_prior)
+#%%    
+    #check that belief map can give back most likely component    
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(1,0,0),1, 1, 1234, 'agent1'))
+    print(test_map.current_belief_vector.get_estimated_state())
+    #most likely location should now be at 1,2
+    assert test_map.get_ith_most_likely_component(1).grid_loc == Vector3r(-1,-1),test_map.get_ith_most_likely_component(1).grid_loc
+    assert test_map.get_ith_most_likely_component(2).grid_loc == Vector3r(1,0),test_map.get_ith_most_likely_component(2).grid_loc
     
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0,0),1, 1, 1234, 'agent1'))
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0,0),1, 2, 1235, 'agent1'))
+    assert test_map.get_ith_most_likely_component(2).grid_loc == Vector3r(2,0),test_map.get_ith_most_likely_component(2).grid_loc
+    
+#    test_array = np.array([0.5,0.2,0.6,0.1])
+#    np.argsort(test_array)
     #%%
-    del obs2_prior, obs3_prior, test_map
-    #%%
-    #now check observing in a different order gives same result
-    test_map = create_belief_map(test_grid)
-    test_map.update_from_observation(obs2)
-    test_map.update_from_observation(obs1)
-    obs3_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
-    test_map.update_from_observation(obs3)
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs3.probability, obs3_prior)
-    
-    #now check observing in a different order gives same result
-    test_map = create_belief_map(test_grid)
-    test_map.update_from_observation(obs3)
-    test_map.update_from_observation(obs2)
-    obs1_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
-    test_map.update_from_observation(obs1)
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs1.probability, obs1_prior)
-    
-    #now check observing in a different order gives same result
-    test_map = create_belief_map(test_grid)
-    test_map.update_from_observation(obs1)
-    test_map.update_from_observation(obs3)
-    obs2_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
-    test_map.update_from_observation(obs2)
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs2.probability, obs2_prior)
+#    del test_map
+#    #prove order in which observations come in doesn't matter
+    obs1 = BinaryAgentObservation(Vector3r(1.0,2,0),0, 1, 1234, 'agent1')
+    obs2 = BinaryAgentObservation(Vector3r(1,2),0, 2, 1235, 'agent1')
+    obs3 = BinaryAgentObservation(Vector3r(1,2.0,0), 1, 3, 1237, 'agent1')
+#    test_map = create_single_source_belief_map(test_grid)
+#    
+#    assert obs1.grid_loc == Vector3r(float(1), float(2))
+#    assert test_map.get_belief_map_component(Vector3r(1.0,2,0)).likelihood == 1/len(test_grid.get_grid_points())
+#    test_map.update_from_observation(obs1)
+#    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs1.probability, 1/len(test_grid.get_grid_points()))
+#
+#    obs2_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
+#    test_map.update_from_observation(obs2)
+#    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs2.probability, obs2_prior)
+#    
+#    #%%
+#    del obs2_prior, obs3_prior, test_map
+#    #%%
+#    #now check observing in a different order gives same result
+#    test_map = create_belief_map(test_grid)
+#    test_map.update_from_observation(obs2)
+#    test_map.update_from_observation(obs1)
+#    obs3_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
+#    test_map.update_from_observation(obs3)
+#    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs3.probability, obs3_prior)
+#    
+#    #now check observing in a different order gives same result
+#    test_map = create_belief_map(test_grid)
+#    test_map.update_from_observation(obs3)
+#    test_map.update_from_observation(obs2)
+#    obs1_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
+#    test_map.update_from_observation(obs1)
+#    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs1.probability, obs1_prior)
+#    
+#    #now check observing in a different order gives same result
+#    test_map = create_belief_map(test_grid)
+#    test_map.update_from_observation(obs1)
+#    test_map.update_from_observation(obs3)
+#    obs2_prior = test_map.get_belief_map_component(Vector3r(1,2)).likelihood
+#    test_map.update_from_observation(obs2)
+#    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs2.probability, obs2_prior)
     
     #%%
     unif_prior = generate_uniform_prior(test_grid)
-    test_map = create_belief_map(test_grid, unif_prior)
+    test_map = create_single_source_belief_map(test_grid, unif_prior)
 
     del test_map
     gaussian_prior = generate_gaussian_prior(test_grid, [1,3], [[7,0], [0,15]], 0.5)
-    test_map = create_belief_map(test_grid, gaussian_prior)
+    test_map = create_single_source_belief_map(test_grid, gaussian_prior)    
 #%%
-    #now check observing in a different order gives same result
-    del test_map
-    test_map = create_belief_map(test_grid)
-    test_map.update_from_observations([obs3, obs2, obs1])
-    assert test_map.get_belief_map_component(Vector3r(1,2)).likelihood == calc_posterior(obs1.probability, calc_posterior(obs2.probability,calc_posterior(obs3.probability, list(test_map.prior.values())[0])))
-
-    del test_map
-    #obs4 = AgentObservation(Vector3r(0,2,0),0.4, 1, 1234, 'agent2')
-    test_map = create_belief_map_from_observations(test_grid, [obs1, obs2, obs3])
-    print(test_map)
-
-    test_map.save_visualisation("C:/Users/13383861/Downloads/test_plot_before_smoothing.png")
-    print([comp.likelihood for comp in test_map.get_belief_map_components()])
-    test_map.apply_gaussian_blur()
-    print([comp.likelihood for comp in test_map.get_belief_map_components()])
-    test_map.save_visualisation("C:/Users/13383861/Downloads/test_plot_after_smoothing.png")
-
-#%%
-    del test_map
-    del test_grid
-    test_grid = UE4Grid(1, 1, Vector3r(0,0), 20, 15)
-    test_map = create_belief_map(test_grid)
-    obs1 = AgentObservation(Vector3r(10,7,0),0.4, 1, 1234, 'agent1')
-    obs2 = AgentObservation(Vector3r(10,7),0.7, 2, 1235, 'agent1')
-    obs3 = AgentObservation(Vector3r(10, 7,0),0.93, 3, 1237, 'agent1')
-    test_map.update_from_observations([obs1, obs2, obs3])    
-    
-#%%
-    print(get_upper_confidence_given_obs([obs1.probability, obs2.probability, obs3.probability]))
-    print(get_lower_confidence_given_obs([obs1.probability, obs2.probability, obs3.probability]))
-    #BeliefMap(agent_name, grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior)
-    uCIBelMap = ConfidenceIntervalBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.1) for grid_point in test_grid.get_grid_points()])
-    uCIBelMap.calculate_upper_confidence_from_observations([obs1, obs2, obs3])
-    uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
-    uCIBelMap.calculate_lower_confidence_from_observations([obs1, obs2, obs3])
-    uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
+#    print(get_upper_confidence_given_obs([obs1.reading, obs2.reading, obs3.reading]))
+#    print(get_lower_confidence_given_obs([obs1.reading, obs2.reading, obs3.reading]))
+#    #BeliefMap(agent_name, grid, [BeliefMapComponent(grid_point, prior[grid_point]) for grid_point in grid.get_grid_points()], prior)
+#    uCIBelMap = ConfidenceIntervalBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.1) for grid_point in test_grid.get_grid_points()])
+#    uCIBelMap.calculate_upper_confidence_from_observations([obs1, obs2, obs3])
+#    uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
+#    uCIBelMap.calculate_lower_confidence_from_observations([obs1, obs2, obs3])
+#    uCIBelMap._get_current_likelihood_at_loc(obs1.grid_loc)
 #%%
     test_grid = UE4Grid(1, 1, Vector3r(0,0), 8, 6)
     #prob of postive reading at non-source location = false alarm = alpha
     false_positive_rate = 0.2
     #prob of negative reading at source location = missed detection = beta
     false_negative_rate = 0.1
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-    cb_bel_map2 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-    cb_bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    cb_bel_map1 = SingleSourceBinaryBeliefMap(test_grid, unif_prior, false_positive_rate, false_negative_rate)
+    cb_bel_map2 = SingleSourceBinaryBeliefMap(test_grid, unif_prior, false_positive_rate, false_negative_rate)
+    cb_bel_map3 = SingleSourceBinaryBeliefMap(test_grid, unif_prior, false_positive_rate, false_negative_rate)
     #%%prove that total belief is same for single source no matter what order beliefs are in.
     
     #first make sure priors are same
@@ -660,10 +811,10 @@ if __name__ == "__main__":
     assert math.isclose(cb_bel_map3.get_probability_source_in_grid(),cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) and math.isclose(cb_bel_map3.get_probability_source_in_grid() ,cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) 
 
     #%%
-    obs1 = AgentObservation(Vector3r(2,4,0),1, 1, 1234, 'agent1')
-    obs2 = AgentObservation(Vector3r(3,4),1, 2, 1235, 'agent1')
-    obs3 = AgentObservation(Vector3r(1, 5,0),0, 3, 1237, 'agent1')
-    obs4 = AgentObservation(Vector3r(2, 5,0),0, 4, 1238, 'agent1')
+    obs1 = BinaryAgentObservation(Vector3r(2,4,0),1, 1, 1234, 'agent1')
+    obs2 = BinaryAgentObservation(Vector3r(3,4),1, 2, 1235, 'agent1')
+    obs3 = BinaryAgentObservation(Vector3r(1, 5,0),0, 3, 1237, 'agent1')
+    obs4 = BinaryAgentObservation(Vector3r(2, 5,0),0, 4, 1238, 'agent1')
     
     cb_bel_map1.update_from_observation(obs1)
     cb_bel_map1.update_from_observation(obs2)
@@ -683,40 +834,12 @@ if __name__ == "__main__":
     #now make sure that the order in which updates are made doesn't matter
     assert math.isclose(cb_bel_map3.get_probability_source_in_grid(),cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) and math.isclose(cb_bel_map3.get_probability_source_in_grid() ,cb_bel_map2.get_probability_source_in_grid(), rel_tol = 0.001) 
     
+    
     #%%
-    # Check whether the optimized grid map gives same results as unoptimized grid map
-    cb_bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-    cb_bel_map2 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-    cb_bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
+    #check that components can successfully be queried
+    cb_bel_map1.get_probability_source_in_grid()
+    print(cb_bel_map1.get_belief_map_components())
 
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,0), 1)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 0)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,1), 1)
-    cb_bel_map1._update_from_prob_optimized_numpy(Vector3r(0,2), 0)
-    
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,0), 1)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,1), 0)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,1), 1)
-    cb_bel_map2._update_from_prob_deprecated(Vector3r(0,2), 0)
-    
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,0), 1)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,1), 0)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,1), 1)
-    cb_bel_map3._update_from_prob_optimized(Vector3r(0,2), 0)
-    
-    
-    assert math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map1.get_probability_source_in_grid(), rel_tol = 0.0001) and math.isclose(cb_bel_map2.get_probability_source_in_grid(),cb_bel_map3.get_probability_source_in_grid(), rel_tol = 0.0001)
-    for comp1, comp2, comp3 in zip(cb_bel_map1.get_belief_map_components(), cb_bel_map2.get_belief_map_components(), cb_bel_map3.get_belief_map_components()):
-        assert math.isclose(comp1.likelihood, comp2.likelihood, rel_tol = 0.0001)
-        assert math.isclose(comp2.likelihood, comp3.likelihood, rel_tol = 0.0001)
-        
-
-
-
-    
     #%%
     
     #interested to know how much is lost and gained by each grid cell given a positive/negative reading
@@ -761,13 +884,11 @@ if __name__ == "__main__":
     false_positive_rate = 0.2
     #prob of negative reading at source location = missed detection = beta
     false_negative_rate = 0.1
-    cb_bel_map = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.008) for grid_point in test_grid.get_grid_points()], 
-                                                             {grid_point: 0.008 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-    
     import math
+    cb_bel_map = SingleSourceBinaryBeliefMap(test_grid, unif_prior, false_positive_rate, false_negative_rate)
     prev_belief = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(0,0), 1)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(0,0), 1, 4, 1238, 'agent1'))
     current_belief = cb_bel_map.get_probability_source_in_grid()
     #numerator = ((1-false_negative_rate) * prior_val) + (false_positive_rate*(prev_bel-prior_val))
     #denominator = ((false_positive_rate * (1-prior_val)) + ((1-false_negative_rate) * (prior_val))) * prev_bel
@@ -778,7 +899,7 @@ if __name__ == "__main__":
     #check holds for another positive reading
     prev_belief = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(0,4)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(0,4), 1)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(0,4), 1, 4, 1238, 'agent1'))
     current_belief = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_belief/prev_belief, relative_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     assert math.isclose(current_belief-prev_belief, absolute_change_bel_pos_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
@@ -789,7 +910,7 @@ if __name__ == "__main__":
     #now check given a negative reading, the belief map updates as it should.
     prev_bel = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0), 0, 4, 1238, 'agent1'))
     current_bel = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     print((relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading) - 1) * prev_bel)
@@ -800,7 +921,7 @@ if __name__ == "__main__":
     #check holds for another negative reading
     prev_bel = cb_bel_map.get_probability_source_in_grid() 
     prior_val_at_reading = cb_bel_map.get_belief_map_component(Vector3r(2,0)).likelihood
-    cb_bel_map.update_from_prob(Vector3r(2,0), 0)
+    cb_bel_map.update_from_observation(BinaryAgentObservation(Vector3r(2,0), 0, 4, 1238, 'agent1'))
     current_bel = cb_bel_map.get_probability_source_in_grid()
     assert math.isclose(current_bel/prev_bel, relative_change_bel_neg_reading(false_positive_rate, false_negative_rate, prev_belief, prior_val_at_reading), rel_tol = 0.001)
     #due to round-off, can only get to within 2%
@@ -829,58 +950,7 @@ if __name__ == "__main__":
     plt.ylabel("Relative change in belief")
     plt.legend()
     #write some assertions here!
-    
-#%%
-    import math
-    import random
-    import time
-    import matplotlib.pyplot as plt
-    timings = []
-    #check how long updated a belief map takes as a function of grid size
-    #grid sizes are from 100 to 2704
-    
-    no_updates = 20
-    #square grids, size is the side length, number of grid cells is size**2
-    start_test_grid_size = 20
-    end_test_grid_size = 80
-    step_size = 5
-    test_grids = [UE4Grid(1, 1, Vector3r(0,0), start_test_grid_size + i*step_size, start_test_grid_size + i*step_size) for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))]
-    print("Running with {} test grids".format(len(test_grids)))
-    false_positive_rate = 0.2
-    false_negative_rate = 0.1
-    method1_timings = []
-    method2_timings = []
-    method3_timings = []
-    #%%
-    validate = input("Are you sure you want to run (takes around an hour)")
-    if validate == 'y':
-        for test_grid in test_grids:
-            
-            bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
-                                                                 {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-            bel_map2 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
-                                                                 {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-            bel_map3 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
-                                                                 {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
-            t1 = time.time()
-            for i in range(no_updates):
-                bel_map1.update_from_prob(Vector3r(i, i+1), round(random.random()))
-            t2 = time.time()
-            #record the average time per update
-            method1_timings.append((t2 - t1)/no_updates)
-            
-            t1 = time.time()
-            for i in range(no_updates):
-                bel_map1.update_from_prob_optimized(Vector3r(i, i+1), round(random.random()))
-            t2 = time.time()
-            method2_timings.append((t2 - t1)/no_updates)
-            
-            t1 = time.time()
-            for i in range(no_updates):
-                bel_map1.update_from_prob_optimized_one(Vector3r(i, i+1), round(random.random()))
-            t2 = time.time()
-            method3_timings.append((t2 - t1)/no_updates)
-    
+
     #%%
     plt.figure()
     plt.plot([(start_test_grid_size + i*step_size)**2 for i in range(int((end_test_grid_size - start_test_grid_size)/step_size))],method1_timings, label = "non-optimized timings")
@@ -936,12 +1006,12 @@ if __name__ == "__main__":
     timings = []
     #%%
     for test_number, test_grid in enumerate(test_grids):
-        bel_map1 = ChungBurdickBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
+        bel_map1 = SingleSourceBinaryBeliefMap(test_grid, [BeliefMapComponent(grid_point, 0.002) for grid_point in test_grid.get_grid_points()], 
                                                              {grid_point: 0.002 for grid_point in test_grid.get_grid_points()}, false_positive_rate, false_negative_rate)
         print("test {} out of {}".format(test_number, len(test_grids)))
         t1 = time.time()
         for i in range(no_updates):
-            bel_map1.update_from_prob(Vector3r(i, i+1), round(random.random()))
+            bel_map1.update_from_observation(BinaryAgentObservation(Vector3r(i, i+1), round(random.random()), 4, 123, 'agent1'))
         t2 = time.time()
         #record the average time per update
         timings.append((t2 - t1)/no_updates)
@@ -965,13 +1035,75 @@ if __name__ == "__main__":
     plt.xlabel("Number of grid cells")
     plt.legend()
 
+
+#%%
+    t1 = time.time()
+    times = [time.time()]
+    for grid_loc in bel_map1.get_grid().get_grid_points():
+        bel_map1.get_belief_map_component(grid_loc)
+        times.append(time.time())
+    #%%
+    times = [time - times[0] for time in times]
+    times = [times[i] - times[i-1] for i in range(1,len(times)-1)]
+    #analyse binary search for retrieving a grid location
+    plt.plot(times)
+    print("average lookup time for individual belief map component: {} seconds".format(sum(times)/len(times)))
+    sample_variance = (sum([t**2 for t in times]) - ((sum(times)**2)/len(times)))/(len(times) - 1)
+    print("variance in lookup time for individual belief map component: {} seconds".format(sample_variance))
+    #%%
+    #test the pickle methods
+    pickle_file_loc = "D:/OccupancyGrid/PickledObjects/test_pickle.bin"
+    bel_map1.pickle_to_file(pickle_file_loc)
+    #%%
+    with open(pickle_file_loc, 'rb') as f:
+        bel_map_pickled = pickle.load(f)
+        for grid_loc in bel_map1.get_grid().get_grid_points():
+            assert bel_map_pickled.get_belief_map_component(grid_loc) == bel_map1.get_belief_map_component(grid_loc) 
         
         
         
-        
-        
-        
-        
-        
-        
-        
+    #%%
+    import random
+    grid = UE4Grid(1,1,Vector3r(0.0), 10, 10)
+    grid.get_grid_points()
+    bel_maps = [create_single_source_belief_map(grid, beta = 0.1, alpha = i/20) for i in range(20)]
+    beliefs = [[0.5] for i in bel_maps]
+    #%%
+    for i in range(10):
+        for j in range(10):
+            for bel_map_index, bel_map in enumerate(bel_maps):
+                #bel_map.update_from_observation(BinaryAgentObservation(Vector3r(int(random.random()*10), int(random.random() * 10),0),0, 4, 1238, 'agent1'))
+                bel_map.update_from_observation(BinaryAgentObservation(Vector3r(i,j),0, i, 1238, 'agent1'))
+                beliefs[bel_map_index].append(bel_map.get_probability_source_in_grid())
+#%%
+    import matplotlib.pyplot as plt
+    plt.figure()    
+    for belief_index, belief in enumerate(beliefs):
+        plt.plot([i for i in range(101)], belief, label = "FPR {}".format(belief_index/20))
+    plt.legend(loc = 'right')
+    plt.title("Belief evolution over time with a sequence of negative predictions for varying False Positive Rates of detection")
+#        np.fill_diagonal(fnr_matrix, fnr)
+#    fpr = 0.1
+#    fnr = 0.2
+#    test_grid = UE4Grid(1,1,Vector3r(0.0), 8, 6)
+#    
+#    initial_state = np.array([0.008 for i in range(len(test_grid.get_grid_points()))])
+#    initial_state = np.append(initial_state, 1-initial_state.sum())
+#    fpr_matrix = fpr * np.ones(len(initial_state))
+#    fnr_matrix = fnr * np.ones(len(initial_state))
+#    identity = np.ones(len(initial_state))    
+#    b0 = fnr_matrix
+#    a0 = identity - fpr_matrix
+#        
+#    b1 = identity - fnr_matrix
+#    a1 = fpr_matrix
+#    import time
+#    import sys
+#    update_fns = gen_next_estimated_state_functions(initial_state.shape[0], a1, b1, a0, b0)
+#    get_next_estimated_state(2, 0, initial_state, update_fns)
+    
+    
+    
+    
+    
+
