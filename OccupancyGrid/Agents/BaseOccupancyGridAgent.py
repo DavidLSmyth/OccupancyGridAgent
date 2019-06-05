@@ -120,8 +120,12 @@ class BaseGridAgent:
         
         self.start_comms_server()
         print("Started communications server")
+        
         self.comms_client = AgentCommunicatorClient()
         print("Started communications client")
+        
+        self.check_comms_server_live()
+        
         self.others_coordinated_this_timestep = []
         
         #manages observations of this agent and other agents
@@ -176,6 +180,16 @@ class BaseGridAgent:
         inp = input("Hit r when comms server is up and running.")
         while inp != 'r':
             inp = input("Hit r when comms server is up and running.")
+            
+    def check_comms_server_live(self):
+        print(self.comms_client.check_server_running(self.agent_name))
+        if not self.comms_client.check_server_running(self.agent_name):
+            inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
+            while inp not in ['y','n']:
+                inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
+        else:
+            print("Comms server pinged")
+                
         
     def end_comms_server(self):
         self.comms_client.shutdown_server(self.agent_name)

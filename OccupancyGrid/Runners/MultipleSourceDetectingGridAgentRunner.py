@@ -50,11 +50,8 @@ from Utils.SearchTermination import SequentialProbRatioTest
 #%%
 
 
-
-
-
-if __name__ == '__main__':
-    #args = parse_args(sys.argv[1:])
+def main():
+#args = parse_args(sys.argv[1:])
     #agent_name = args.agent_name
     #print('args: ',args) 
     #%%
@@ -86,7 +83,6 @@ if __name__ == '__main__':
     
     agent1_simulated_sensor = get_simulated_sensor_from_config(1)
 
-    single_source = False
     agent1_sensor_model_fpr, agent1_sensor_model_fnr = get_sensor_model_params_from_config(1).false_positive_rate, get_sensor_model_params_from_config(1).false_negative_rate
     #    grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, search_terminator, other_active_agents = [], prior = {}, comms_radius = 1000, logged = True)
     #estimated_state_map = create_multiple_source_binary_belief_map(grid, uniform_initial, agent1_sensor_model_fpr, agent1_sensor_model_fnr)
@@ -100,9 +96,9 @@ if __name__ == '__main__':
     
     #%%
     
-    agent1 = MultipleSourceDetectingGridAgent(grid, agent1_start_pos, sweep_action_selection_method.get_move, -10, agent1_name, agent1_simulated_sensor, MultipleSourceBinaryBeliefMap, agent1_initial_belief_map, search_terminator, other_active_agents = [], comms_radius = 2, logged=False)
+    agent1 = MultipleSourceDetectingGridAgent(grid, agent1_start_pos, epsilon_greedy_action_selection_method.get_move, -10, agent1_name, agent1_simulated_sensor, MultipleSourceBinaryBeliefMap, agent1_initial_belief_map, search_terminator, other_active_agents = [], comms_radius = 2, logged=False)
     t1 = time.time()
-    located_sources = agent1.find_sources(2)
+    located_sources = agent1.find_sources(3)
     t2 = time.time()
     print("\n\nSeach took {} seconds.".format(t2 - t1))
     print("\nAgent 1 has terminated the search after {} timesteps".format(agent1.timestep))
@@ -124,3 +120,7 @@ if __name__ == '__main__':
     print("\n\nSaving visualisations")
     #agent1.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent1BelMap.png")
     #agent2.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent2BelMap.png")
+
+
+if __name__ == '__main__':
+    main()

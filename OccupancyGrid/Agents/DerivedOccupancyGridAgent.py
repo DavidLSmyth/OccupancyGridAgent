@@ -85,6 +85,7 @@ class SimpleGridAgent(BaseGridAgent):
         self.actuate()
         #perceive the new state of the environment using the agents sensor(s)
         self.perceive()
+
         #record the sensor measurement in a file
         self.record_sensor_measurement()
         #update the agents belief
@@ -125,7 +126,7 @@ class SimpleGridAgent(BaseGridAgent):
             #this actuates, perceives, updates belief map in one step
             self.iterate_next_timestep()
             if self.timestep % 1 == 0:
-                print(self.timestep)
+                print("Timestep: ", self.timestep)
                 self.current_belief_map.save_visualisation("D:/OccupancyGrid/Data/BeliefMapData/BeliefEvolutionImages/img{:03.0f}.png".format(self.timestep))
         #return the most likely component of the belief map. This could be the component that represents the source is not present at all
         print(self.current_belief_map.current_belief_vector.get_estimated_state())
@@ -179,58 +180,83 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
     This agent extends the simple grid agent and is designed to locate multiple sources (or possibly none) of evidence located in 
     a scenario. It includes a battery model.
     '''
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11, charging_location = None):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, battery_capacity_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11, charging_locations = None):
         #default number of battery levels is 0-10 = 11 levels
         super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, comms_radius, logged)
         #initialize battery model.
         self.battery_estimated_state_model = DefaultStochasticBatteryHMM(no_battery_levels)
+        self.battery_capacity_simulator = battery_capacity_simulator
+        if not isinstance(charging_locations, list):
+            self.charging_locations = charging_locations
 
     def reset(self):
         pass
     
-    def find_sources(self, max_no_sources):
-        '''
-        Given an upper limit on the number of sources available in the agent's environment, executes a control loop to locate
-        the sources, or return a given number of sources as found. This is not suitable for multi-agent simulations, where agents
-        should coordinate across each timestep.
-        '''
-        self.max_no_sources = max_no_sources
-        #the locations of sources of evidence that have already been successfully located
-        self.located_sources = []
-        while len(self.located_sources) < self.max_no_sources:
-            next_source = self.find_source()
-            #check if the source is deemed to not be present at all
-            #if so, break the loop
-            #This is bad practice - try and fix in future
-            print("next_source: ", next_source)
-            if next_source.grid_loc == Vector3r(-1, -1):
-                break
-            #given the next located source, append it to the list of located sources and then 
-            #modify the belief vector to set the probability of subsequent sources to be found at
-            #the given location to be zero.
-            self.located_sources.append(next_source)
-            #
-            self.current_belief_map.mark_source_as_located(next_source.grid_loc)
-        #return the list of located sources to the user
-        return self.located_sources
-
-    def update_battery_belief(self, observed_battery_level, position_to_move_to, recharge = False):
-        #need to include the battery model in this
-        if position_to_move_to == self.current_pos_intended:
-            if recharge: 
-                self.battery_estimated_state_model.update_estimated_state('recharge', observed_battery_level)
-            else:
-                #agent is hovering, for now assume that the battery doesn't change. 
-                
-                pass
+    def move_agent(self, location: Vector3r, other_agent_positions):
+        if location in other_agent_positions: 
+            #this simulates a lower-level collision avoidence agent instructing 
+            #robot to not crash into others
+            return None
+        elif self.battery_capacity_simulator.get_current_capacity <= 0.01:
+            #this simulates the agents battery failing
+            print("BATTERY FAILURE - AGENT WILL NOT MOVE ANY MORE")
+            return None
         else:
-            self.battery_estimated_state_model.update_estimated_state('recharge', observed_battery_level)
+            self._move_agent(location)
+      
+    def update_battery_belief(self, new_location):
+        
+        self.current_pos_intended = new_location
+        #due to drift and other possible noise the intended position may not equate to measured position at which
+        #sensor reading was taken
+        self.current_pos_measured = new_location
+        self.explored_grid_locs.append(new_location)
+        
+        if new_location == self.current_location and new_location in self.charging_locations:
+            #assume that agent has decided to recharge for a single timestep
+            #this is not consistent with the move actions, for which a variable number of timesteps could be used to update
+            #need to get reading from simulated battery once action has been performed
+            #this is very messy but for now assume the battery recharge adds 10% of max. capacity per unit timestep
+            self.battery_capacity_simulator.self.current_capacity += 0.1
+            self.battery_hmm.update_estimated_state('recharge', self.battery_capacity_simulator.get_current_capacity())
+            
+        else:
+            distance_to_travel = new_location.distance_to(self.current_pos_intended)
+            no_seconds = distance_to_travel / self.operational_speed
+            no_updates = round(no_seconds)
+            #in reality, would instruct RAV to move to desired location and sample battery capacity percepts at fixed 
+            #intervals. Updates to the battery_capacity hmm would occur independently as each of these percepts is recorded
+            #simulated_sensor_readings = []
+            for _ in range(no_updates):
+                self.battery_capacity_simulator.move_by_dist_at_speed(self.operational_speed)
+                self.battery_hmm.update_estimated_state('move', round(self.battery_capacity_simulator.get_current_capacity()))
+            
 
 
 
+    def iterate_next_timestep(self, other_agent_positions = []):
+        ''' 
+        At each discrete timestep, the agent chooses an action to take, executes it and then perceives the environment in which it is operating.
+        The agent cannot move to a location which another agent is occupying (or is planning to occupy on the same timestep).
+        '''
+        #choose an action to perform, sending it to the robot to perform it
+        self.actuate()
+        #perceive the new state of the environment using the agents sensor(s)
+        self.perceive()
+        
+        #first update the battery belief state, which is independent of the source locations belief state
+        self.update_battery_belief()
 
-
-
+        #record the sensor measurement in a file
+        self.record_sensor_measurement()
+        #update the agents belief
+        self.update_belief(self.latest_observation)
+        
+        #coordinate with other agents if possible
+        #in future implement a coordination strategy
+        for other_active_agent in self.other_active_agents:
+            if self.can_coord_with_other(other_active_agent, self.comms_radius):
+                self.coord_with_other(other_active_agent)
 
 
 

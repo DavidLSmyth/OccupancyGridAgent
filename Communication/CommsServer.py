@@ -9,15 +9,13 @@ from flask_restful import Resource, Api
 #%%
 import sys
 sys.path.append('.')
-sys.path.append('..')
+
 from Utils.ObservationSetManager import AgentObservationFileReader
 
 '''
 A class that provides functionality for agents to communicate with each other. Approach is RESTful to fit in with ROCSAFE architecture.
 In ROCSAFE, POST requests will be sent for the most recent sensor reading. This implementation uses a GET request for simplicity.
 '''
-
-
 
 #%%
 class AgentCommunicatorServer:
@@ -64,6 +62,15 @@ class AgentCommunicatorServer:
             self.shutdown()
             return 'Server shut down request submitted...'
         
+    class _Ping(Resource):
+        '''Allows the user to request a shutdown of the flask server'''
+        def ping(self):
+            return
+            
+        def get(self):
+            self.ping()
+            return 'Successfully pinged'
+        
         
     def __init__(self, agent_name, ip = '127.0.0.1'):
         AgentCommunicatorServer.no_communicators += 1
@@ -72,6 +79,7 @@ class AgentCommunicatorServer:
         self.api = Api(self.app)
         self.api.add_resource(AgentCommunicatorServer._AgentObservationsRequest, '/get_observations/<agent_name>/<timestep>')
         self.api.add_resource(AgentCommunicatorServer._ShutdownServer, '/shutdown')
+        self.api.add_resource(AgentCommunicatorServer._Ping, '/ping')
         self.port = port
     
     def run_app(self):

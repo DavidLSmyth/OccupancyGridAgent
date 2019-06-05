@@ -328,6 +328,57 @@ class DefaultStochasticBatteryHMM(StochasticBatteryHMM):
         #assume the battery is known to be fully charged to begin with
         super().__init__(no_battery_levels, get_transition_model_probability_matrix_with_action, batt_meter_matrix, np.array([0 for i in range(no_battery_levels-1)] + [1]))
 
+
+class BatteryAgent():
+    
+    def __init__(self, operational_speed, start_location, recharge_locations):
+        self.current_location = start_location
+        if not isinstance(recharge_locations, list):
+            recharge_locations = list(recharge_locations)
+        self.recharge_locations = recharge_locations
+        self.operational_speed = operational_speed
+        self.battery_hmm = DefaultStochasticBatteryHMM(11)
+        self.valid_actions = ['recharge', 'move']
+    
+    def actuate(self):
+        '''
+        Select an action to take and then execute that action in the environment. This is assumed to be deterministic.
+        '''
+        self.increment_timestep()
+        #actions are assumed to tell agent where to move
+        action = self._select_action()
+        self.current_pos_intended = action[1]
+        
+    def perceive(self):
+        '''
+        Use on-board sensors to percieve the environment and store the perceptions for use in future computations regarding
+        which actions to take
+        '''
+        self.current_sensor_reading = self.occupancy_sensor_simulator.get_reading(self.current_pos_intended)
+        
+    def update_agent(self, action, new_location, observation):
+        '''
+        Given an action to perform (either move to a new location or recharge at the recharging station), 
+        updates the distribution of the hidden state of the agent.
+        From Probabilistic Robotics p.24:  "through no particular motivation we assume here that the robot executes a control action u1
+        first, and then takes a measurement z1."
+        Simulated battery model needs to return the observation given that the battery has recharged for a single timestep.
+        '''
+        assert action in self.valid_actions
+        if action == 'recharge' and new_location == self.current_location:
+            #assume that agent has decided to recharge for a single timestep
+            #this is not consistent with the move actions, for which a variable number of timesteps could be used to update
+            #need to get reading from simulated battery once action has been performed
+            self.battery_hmm.update_estimated_state(action, observation)
+        else:
+            
+            distance_to_travel = new_location.distance_to(self.current_pos_intended)
+            no_seconds = distance_to_travel / self.operational_speed
+            no_updates = round(no_seconds)
+            
+            
+            
+        
     
 #%%    
 if __name__ == '__main__':

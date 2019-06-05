@@ -3,6 +3,8 @@
 Created on Mon Mar 11 16:08:00 2019
 
 @author: 13383861
+
+Simulates a battery
 """
 
 import time
@@ -94,7 +96,7 @@ plt.plot([i for i in range(40)], [splev(i, effective_capacity_given_speed_spline
 
 
 #%%
-class RAVBattery:
+class RAVBatterySimulator:
     
     '''
     A battery class to be used with a Remote Aerial Vehicle agent. This can be subclassed with more complex models.
@@ -110,14 +112,14 @@ class RAVBattery:
     
     #recharge time from 0% - 100% in seconds (20 minutes)
     #recharge_time = 60*20
-    recharge_time = 6
+    recharge_time = 10
     
     def __init__(self, intial_capacity_percentage):
-        self.effective_capacities = [flight_time / max(RAVBattery.flight_times) for flight_time in RAVBattery.flight_times]
+        self.effective_capacities = [flight_time / max(RAVBatterySimulator.flight_times) for flight_time in RAVBatterySimulator.flight_times]
         #calculate effective flight ranges
-        self.effective_flight_ranges = {speed: effective_capacity * RAVBattery.maximum_range for speed, effective_capacity in zip(RAVBattery.speeds_ranges, self.effective_capacities)}
-        self.current_range = intial_capacity_percentage * RAVBattery.maximum_range 
-        self.effective_capacity_given_speed_spline = splrep(RAVBattery.speeds_ranges, sorted(self.effective_flight_ranges.values(), reverse = True))
+        self.effective_flight_ranges = {speed: effective_capacity * RAVBatterySimulator.maximum_range for speed, effective_capacity in zip(RAVBatterySimulator.speeds_ranges, self.effective_capacities)}
+        self.current_range = intial_capacity_percentage * RAVBatterySimulator.maximum_range 
+        self.effective_capacity_given_speed_spline = splrep(RAVBatterySimulator.speeds_ranges, sorted(self.effective_flight_ranges.values(), reverse = True))
         self.predict_capacity_given_speed = lambda speed: splev(speed, self.effective_capacity_given_speed_spline)
         self.initial_capacity = intial_capacity_percentage
         self.current_capacity = intial_capacity_percentage
@@ -151,11 +153,11 @@ class RAVBattery:
         self.current_capacity += amount
     
     def move_by_dist_at_speed(self, dist, speed) -> "True if the agent has enough battery capacity to move the required distance at the required speed, otherwise false":
-        if self.current_range - (dist * (RAVBattery.maximum_range/self.predict_capacity_given_speed(speed)))> 0:
+        if self.current_range - (dist * (RAVBatterySimulator.maximum_range/self.predict_capacity_given_speed(speed)))> 0:
             #calculate the proportion of the battery would be used up relative to the maximum capacity travelling the given distance at the given speed
             #then scale up to the maximum range
-            self.current_range = self.current_range - (dist * (RAVBattery.maximum_range/self.predict_capacity_given_speed(speed)))
-            self.current_capacity = self.current_range / RAVBattery.maximum_range
+            self.current_range = self.current_range - (dist * (RAVBatterySimulator.maximum_range/self.predict_capacity_given_speed(speed)))
+            self.current_capacity = self.current_range / RAVBatterySimulator.maximum_range
             return True
         else:
             #no need to update
@@ -187,7 +189,7 @@ class RAVBattery:
             #the proportion of time the battery has spent charging until it reaches desired capacity is:
             (time.time() - self.__charging_start_time)/self.__current_recharge_time
             self.current_capacity = self._initial_recharge_capacity + ((self._desired_capacity - self._initial_recharge_capacity) *  ((time.time() - self.__charging_start_time)/self.__current_recharge_time))
-            self.current_range = self.current_capacity * RAVBattery.maximum_range
+            self.current_range = self.current_capacity * RAVBatterySimulator.maximum_range
         return is_recharging
         
     def recharge_to_percentage(self, capacity_percentage) -> "The time taken to recharge the battery to the given percentage":
@@ -203,10 +205,10 @@ class RAVBattery:
         self._initial_recharge_capacity = self.current_capacity
         self._desired_capacity = capacity_percentage
         #self.current_capacity = capacity_percentage
-        recharge_time = RAVBattery.recharge_time * capacity_percentage
+        recharge_time = RAVBatterySimulator.recharge_time * capacity_percentage
         #don't return until the battery has recharged
         self._recharge_for_n_seconds(recharge_time)
-        return RAVBattery.recharge_time * capacity_percentage
+        return RAVBatterySimulator.recharge_time * capacity_percentage
     
     def cancel_recharging(self):
         self.poll()
@@ -239,13 +241,13 @@ class RAVBattery:
                     f_object.write(str(time_stamp_index) + ',' + str(capacity) + '\n')
         return capacities
 
-class RAVBatteryAgent:
+class RAVBatterySimulatorAgent:
     '''
     A class that manages a physical RAV's battery model.
     '''
     
     def __init__(self, initial_battery_percentage, initial_location: Vector3r):
-        self.battery = RAVBattery(initial_battery_percentage)
+        self.battery = RAVBatterySimulator(initial_battery_percentage)
         self.current_location = initial_location
         
     def can_move_to_location(self, target_location: Vector3r, current_location: Vector3r, speed: float):
@@ -299,7 +301,7 @@ if __name__ == '__main__':
 #%% 
     import math
     #set initial capacity as full
-    test_battery = RAVBattery(1)
+    test_battery = RAVBatterySimulator(1)
 #    test_battery.move_by_dist_at_speed(200, 5)
 #    print(test_battery.get_current_capacity())
 #    print(test_battery.get_remaining_range_at_speed(5))
@@ -373,7 +375,7 @@ if __name__ == '__main__':
     
     
     #%%
-    bat_agent = RAVBatteryAgent(1, Vector3r(0,0))
+    bat_agent = RAVBatterySimulatorAgent(1, Vector3r(0,0))
     bat_agent.can_move_to_location()
     
     #%%
