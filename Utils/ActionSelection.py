@@ -32,7 +32,7 @@ class BaseActionSelection(ABC):
     def __init__(self):
         pass
     
-    def get_move(self, belief_map, current_grid_loc, explored_grid_locs):
+    def get_move(self, belief_map, current_grid_loc, explored_grid_locs) - > 'Tuple(action (recharge or move), location to move to)':
         '''Every agent should have a get move method which will override this method'''
         pass
 
@@ -67,7 +67,7 @@ class EpsilonGreedyActionSelection(BaseActionSelection):
             
            return_move = self.get_greedy_move(neighbors, belief_map, current_grid_loc, epsilon, eff_radius)            
 
-        return greedy, return_move
+        return 'move', return_move
     
     def get_greedy_move(self,neighbors, belief_map, current_grid_loc: Vector3r, epsilon: float, eff_radius = None) -> (bool, Vector3r):
         best_moves = sorted(neighbors, key = lambda neighbor: belief_map.get_belief_map_component(neighbor).likelihood, reverse=True)
@@ -124,7 +124,7 @@ class TSPActionSelection(BaseActionSelection):
         
     def get_move(self, belief_map, current_grid_loc, explored_grid_locs):
         #no greedy moves so always return false
-        return False, self.get_next_move()
+        return 'move', self.get_next_move()
 
 #%%
 class TSPNNActionSelection(BaseActionSelection):
@@ -157,7 +157,7 @@ class TSPNNActionSelection(BaseActionSelection):
         
     def get_move(self, belief_map, current_grid_loc, explored_grid_locs):
         #no greedy moves so always return false
-        return False, self.get_next_move()    
+        return 'move', self.get_next_move()    
 
 #%%
 class TSPActionSelectionWithPrior(BaseActionSelection):
@@ -192,7 +192,7 @@ class TSPActionSelectionWithPrior(BaseActionSelection):
         
     def get_move(self, belief_map, current_grid_loc, explored_grid_locs):
         #no greedy moves so always return false
-        return False, self.get_next_move()
+        return 'move', self.get_next_move()
     
 #%%
 
@@ -208,7 +208,14 @@ class SaccadicActionSelection(GreedyActionSelection):
         '''Return the largest value in the belief map to explore next'''
         #find the maximum likelihood belief map component
         max_belief_loc = max(belief_map.get_belief_map_components(), key = lambda bel_map_component: bel_map_component.likelihood)
-        return False, max_belief_loc.grid_loc
+        return 'move', max_belief_loc.grid_loc
+    
+#%%
+class EpsilonGreedyActionSelectionWithBattery():
+    '''
+    Returns an Epsilon Greedy Move, but also taken into account the battery capacity estimated state
+    '''
+    pass
 
 #%%
 if __name__ == "__main__":

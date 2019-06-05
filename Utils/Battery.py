@@ -62,37 +62,37 @@ from Utils import Vector3r
 ##AAD = AUW * I
 ##where I stands for the current (in amps) required to lift one kilogram into the air.
 
-
-#for now make a conservative guess at all the parameters. Eventually move these to a config file
-#80% maximum discharge, 20% typically always left in reserve (otherwise the battery gets damaged)
-maximum_discharge = 0.8
-#capacity measured in amp hours
-battery_capacity = 8.8
-battery_voltage = 36
-#assume a weight of 2.5kg with the battery
-agent_weight = 2.5
-#170W/kg power to weight, i.e. how much power needs to lift one kg 
-power_to_weight = 170
-average_amp_draw = agent_weight * power_to_weight / battery_voltage
-#flight time calculated in hours
-flight_time = battery_capacity * maximum_discharge / average_amp_draw
-#this is the RAVs effective flight time in seconds
-flight_time_seconds = flight_time*60*60
-
-#For another time: figure out from above how to generate a discharge model given conditions
-
-
-#https://airdata.com/blog/2017/drone-flight-stats-part-1
-#take graph 2 here and interpolate
-speeds_ranges = [_ for _ in range(0, 41, 5)]
-flight_times = [6.3, 6.3, 6.15, 5.85, 5.3, 4.85, 4.6, 4.1, 3.6]
-effective_capacities = [flight_time / max(flight_times) for flight_time in flight_times]
-#effective capacity given that rav is flying at a certain speed
-effective_capacity_given_speed_spline = splrep(speeds_ranges, effective_capacities)
-
-
-plt.plot([i for i in range(40)], [splev(i, effective_capacity_given_speed_spline ) for i in range(40)])
-#################### Interpolated Battery Model ####################
+def leftovers():
+    #for now make a conservative guess at all the parameters. Eventually move these to a config file
+    #80% maximum discharge, 20% typically always left in reserve (otherwise the battery gets damaged)
+    maximum_discharge = 0.8
+    #capacity measured in amp hours
+    battery_capacity = 8.8
+    battery_voltage = 36
+    #assume a weight of 2.5kg with the battery
+    agent_weight = 2.5
+    #170W/kg power to weight, i.e. how much power needs to lift one kg 
+    power_to_weight = 170
+    average_amp_draw = agent_weight * power_to_weight / battery_voltage
+    #flight time calculated in hours
+    flight_time = battery_capacity * maximum_discharge / average_amp_draw
+    #this is the RAVs effective flight time in seconds
+    flight_time_seconds = flight_time*60*60
+    
+    #For another time: figure out from above how to generate a discharge model given conditions
+    
+    
+    #https://airdata.com/blog/2017/drone-flight-stats-part-1
+    #take graph 2 here and interpolate
+    speeds_ranges = [_ for _ in range(0, 41, 5)]
+    flight_times = [6.3, 6.3, 6.15, 5.85, 5.3, 4.85, 4.6, 4.1, 3.6]
+    effective_capacities = [flight_time / max(flight_times) for flight_time in flight_times]
+    #effective capacity given that rav is flying at a certain speed
+    effective_capacity_given_speed_spline = splrep(speeds_ranges, effective_capacities)
+    
+    
+    plt.plot([i for i in range(40)], [splev(i, effective_capacity_given_speed_spline ) for i in range(40)])
+    #################### Interpolated Battery Model ####################
 
 
 #%%

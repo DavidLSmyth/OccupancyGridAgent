@@ -97,7 +97,9 @@ class BaseGridAgent:
         #intended position (last control action)
         self.current_pos_intended = initial_pos
         #measured position
-        self.current_pos_measured = initial_pos
+        #self.current_pos_measured = initial_pos
+        
+        self.previous_pos_intended = None
         
         #valid grid locations to explore
         self.grid_locs = grid.get_grid_points()
@@ -160,6 +162,9 @@ class BaseGridAgent:
         #self.init_state_for_analysis_file(self.agent_state_file_loc)
         self.init_observations_file(self.observations_file_loc)
         
+        #Set up a "tripwire" variable that can terminate the search 
+        self._end_search_prematurely = False
+        
     def configure_file_conventions(self):
         '''Configures which directory files should be saved'''
         #D:\OccupancyGrid\Config\AgentConfigs
@@ -182,13 +187,12 @@ class BaseGridAgent:
             inp = input("Hit r when comms server is up and running.")
             
     def check_comms_server_live(self):
-        print(self.comms_client.check_server_running(self.agent_name))
         if not self.comms_client.check_server_running(self.agent_name):
             inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
             while inp not in ['y','n']:
                 inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
         else:
-            print("Comms server pinged")
+            print("Comms server successfully pinged for agent {}".format(self.agent_name))
                 
         
     def end_comms_server(self):
@@ -255,15 +259,23 @@ class BaseGridAgent:
         #return self.sensor.get_probability(self.current_pos_measured)
         pass
     
+    def _execute_action(self, action):
+        '''
+        Sends commands to the agents actuators to carry out action
+        '''
+        pass
+    
     def actuate(self):
         '''
         Select an action to take and then execute that action in the environment. This is assumed to be deterministic.
+        This method selects and action to perform and then sends it to the actuators to be executed. It also sets the agents
+        position in the environment 
         '''
         self.increment_timestep()
         #actions are assumed to tell agent where to move
         action = self._select_action()
-        self.current_pos_intended = action[1]
-        
+        #This sends the necessary commands to the agents acuators 
+        self.execute_action(action)
         
         #for now action can be to move the agent to a grid location, or to recharge the battery
         #action = self._select_action()
@@ -306,7 +318,7 @@ class BaseGridAgent:
         pass
     
     @abstractmethod
-    def _move_agent(self, new_location):
+    def move_agent(self, new_location):
         '''
         Responsible for actually sending commands to actuators to move the agent.
         '''
