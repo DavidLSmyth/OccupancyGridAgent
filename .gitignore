@@ -119,3 +119,5 @@ reinfLearning/
 
 OccupancyGrid/Archive/
 OccupancyGrid/PickledObjects/
+ControlFlowDiagrams/
+*.xlsx
