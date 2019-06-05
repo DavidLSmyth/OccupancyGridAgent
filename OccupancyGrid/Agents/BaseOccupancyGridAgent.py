@@ -120,9 +120,6 @@ class BaseGridAgent:
         print("Configuring agent communications")
         self.comms_radius = comms_radius
         
-        self.start_comms_server()
-        print("Started communications server")
-        
         self.comms_client = AgentCommunicatorClient()
         print("Started communications client")
         
@@ -179,21 +176,19 @@ class BaseGridAgent:
         with open(file_loc, 'wb') as f:
             pickle.dump(self, f)
         
-    def start_comms_server(self):
-        #os.system("python ./Communication/CommsServer.py {}".format(self.agent_name))
-        #subprocess.run(["python", "./Communication/CommsServer.py", self.agent_name], shell = True)
-        inp = input("Hit r when comms server is up and running.")
-        while inp != 'r':
-            inp = input("Hit r when comms server is up and running.")
-            
+              
     def check_comms_server_live(self):
         if not self.comms_client.check_server_running(self.agent_name):
-            inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
+            inp = input("Server doesn't seem to be running, would you like to proceed without comms or try and connect again? (n) to try again (y) to proceed")
             while inp not in ['y','n']:
                 inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
+            if inp == 'n':
+                self.check_comms_server_live()
+            else:
+                print("Proceeding without comms server")
         else:
             print("Comms server successfully pinged for agent {}".format(self.agent_name))
-                
+            return True
         
     def end_comms_server(self):
         self.comms_client.shutdown_server(self.agent_name)
@@ -275,7 +270,7 @@ class BaseGridAgent:
         #actions are assumed to tell agent where to move
         action = self._select_action()
         #This sends the necessary commands to the agents acuators 
-        self.execute_action(action)
+        self._execute_action(action)
         
         #for now action can be to move the agent to a grid location, or to recharge the battery
         #action = self._select_action()

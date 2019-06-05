@@ -37,7 +37,6 @@ class AgentCommunicatorClient:
         requests.get("http://localhost:" + str(AgentCommunicatorClient.base_port + int(agent_name.split('agent')[1])) + "/shutdown")
         
     def check_server_running(self, agent_name):
-        print("http://localhost:" + str(AgentCommunicatorClient.base_port + int(agent_name.split('agent')[1])) + '/ping')
         return requests.get("http://localhost:" + str(AgentCommunicatorClient.base_port + int(agent_name.split('agent')[1])) + '/ping').json() == 'Successfully pinged'
         
         

@@ -57,7 +57,7 @@ def main():
     #%%
     t1 = time.time()
     agent1_name = 'agent1'
-#    agent2_name = 'agent2'
+    #agent2_name = 'agent2'
 #    agent3_name = 'agent3'
 
     #%%    
@@ -97,6 +97,7 @@ def main():
     #%%
     
     agent1 = MultipleSourceDetectingGridAgent(grid, agent1_start_pos, epsilon_greedy_action_selection_method.get_move, -10, agent1_name, agent1_simulated_sensor, MultipleSourceBinaryBeliefMap, agent1_initial_belief_map, search_terminator, other_active_agents = [], comms_radius = 2, logged=False)
+    #agent2 = MultipleSourceDetectingGridAgent(grid, agent1_start_pos, epsilon_greedy_action_selection_method.get_move, -10, agent1_name, agent1_simulated_sensor, MultipleSourceBinaryBeliefMap, agent1_initial_belief_map, search_terminator, other_active_agents = [], comms_radius = 2, logged=False)
     t1 = time.time()
     located_sources = agent1.find_sources(3)
     t2 = time.time()

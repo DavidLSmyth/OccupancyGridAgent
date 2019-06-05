@@ -95,6 +95,7 @@ def leftovers():
     #################### Interpolated Battery Model ####################
 
 
+
 #%%
 class RAVBatterySimulator:
     

@@ -316,17 +316,17 @@ class DefaultStochasticBatteryHMM(StochasticBatteryHMM):
     def __init__(self, no_battery_levels):
         
         #use default matrices and vectors calculated above in the file. Eventually move these to a permament file storage location.
-        battery_degradation_t_model = get_battery_degradation_transition_matrix(no_battery_levels, battery_degradation_vectors)
-        battery_recharge_t_model = get_recharge_state_transition_matrix(no_battery_levels, battery_recharge_vectors)
+        #battery_degradation_t_model = get_battery_degradation_transition_matrix(no_battery_levels, battery_degradation_vectors)
+        #battery_recharge_t_model = get_recharge_state_transition_matrix(no_battery_levels, battery_recharge_vectors)
         
-        def get_transition_model_probability_matrix_with_action(action):
-            if action == 'recharge':
-                return battery_recharge_t_model
-            elif action == 'move':
-                return battery_degradation_t_model
+#        def get_transition_model_probability_matrix_with_action(action):
+#            if action == 'recharge':
+#                return battery_recharge_t_model
+#            elif action == 'move':
+#                return battery_degradation_t_model
         
         #assume the battery is known to be fully charged to begin with
-        super().__init__(no_battery_levels, get_transition_model_probability_matrix_with_action, batt_meter_matrix, np.array([0 for i in range(no_battery_levels-1)] + [1]))
+        super().__init__(no_battery_levels, get_transition_model_probability_matrix_with_action, batt_meter_matrix, np.matrix(np.array([0 for _ in range(no_battery_levels-1)] + [1]), dtype = np.float64).reshape(11,1))
 
 
 class BatteryAgent():
@@ -385,9 +385,9 @@ if __name__ == '__main__':
 
     #%%
     initial_distribution = np.matrix([0,0,0,0,0,0,0,0,0,0,1], dtype = np.float64).reshape(11,1)
-    
 
     batt_hmm = StochasticBatteryHMM(11, get_transition_model_probability_matrix_with_action, batt_meter_matrix, initial_distribution)
+    batt_hmm = DefaultStochasticBatteryHMM(11)
     assert batt_hmm.get_expected_battery_capacity() == 10
     batt_hmm.update_estimated_state('move', 10)
     batt_hmm.get_estimated_state()

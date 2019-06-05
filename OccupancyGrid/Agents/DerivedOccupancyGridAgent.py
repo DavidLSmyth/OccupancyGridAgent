@@ -50,18 +50,6 @@ class SimpleGridAgent(BaseGridAgent):
         else:
             raise Exception("Invalid action requested by {}: {}".format(self.agent_name, action))
         
-        
-    def move_agent(self, location: Vector3r, other_agent_positions):
-        '''
-        This sends the commands to the actuators to physically move the agent
-        '''
-        if location in other_agent_positions: 
-            #this simulates a lower-level collision avoidence agent instructing 
-            #robot to not crash into others
-            return None
-        else:
-            self._move_agent(location)
-
 #    def coord_with_other(self, other_rav_name):
 #        
 #        '''
@@ -82,15 +70,7 @@ class SimpleGridAgent(BaseGridAgent):
 #
 #        self.current_belief_map = create_belief_map_from_observations(self.grid, self.agent_name, self.observation_manager.get_all_observations(), self.current_belief_map.get_prior())
 #        self.others_coordinated_this_timestep.append(other_rav_name)       
-         
-    def _move_agent(self, new_location):
-        self.previous_pos_intended = self.current_pos_intended
-        self.current_pos_intended = new_location
-        #due to drift and other possible noise the intended position may not equate to measured position at which
-        #sensor reading was taken
-        #self.current_pos_measured = new_location
-        self.explored_grid_locs.append(new_location)
-        
+            
     def _select_action(self):
         return self.move_from_bel_map_callable(self.current_belief_map, self.current_pos_intended, self.explored_grid_locs)
         
@@ -102,16 +82,26 @@ class SimpleGridAgent(BaseGridAgent):
         '''
         #choose an action to perform, sending it to the robot to perform it
         self.actuate()
+        
         #perceive the new state of the environment using the agents sensor(s)
         self.perceive()
 
         #record the sensor measurement in a file
         self.record_sensor_measurement()
+        
         #update the agents belief
         self.update_belief(self.latest_observation)
         
         #coordinate with other agents if possible
         #in future implement a coordination strategy
+        for other_active_agent in self.other_active_agents:
+            if self.can_coord_with_other(other_active_agent, self.comms_radius):
+                self.coord_with_other(other_active_agent)
+                
+    def coord_with_all_others(self):
+        '''
+        Attempt to coordinate with all active other agents
+        '''
         for other_active_agent in self.other_active_agents:
             if self.can_coord_with_other(other_active_agent, self.comms_radius):
                 self.coord_with_other(other_active_agent)
@@ -149,7 +139,7 @@ class SimpleGridAgent(BaseGridAgent):
             #this actuates, perceives, updates belief map in one step
             self.iterate_next_timestep()
             if self.timestep % 1 == 0:
-                print("Timestep: ", self.timestep)
+                print("Timestep: {}, Location explored: {}".format(self.timestep, self.current_pos_intended))
                 #self.current_belief_map.save_visualisation("D:/OccupancyGrid/Data/BeliefMapData/BeliefEvolutionImages/img{:03.0f}.png".format(self.timestep))
                 
         #return the most likely component of the belief map. This could be the component that represents the source is not present at all
@@ -204,7 +194,7 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
     This agent extends the simple grid agent and is designed to locate multiple sources (or possibly none) of evidence located in 
     a scenario. It includes a battery model.
     '''
-    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, battery_capacity_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11, charging_locations = None):
+    def __init__(self, grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, battery_capacity_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents = [], comms_radius = 1000, logged = True, no_battery_levels = 11, charging_locations = None, operational_speed = 1):
         #default number of battery levels is 0-10 = 11 levels
         super().__init__(grid, initial_pos, move_from_bel_map_callable, height, agent_name, occupancy_sensor_simulator, belief_map_class, init_belief_map, search_terminator, other_active_agents, comms_radius, logged)
         #initialize battery model.
@@ -214,12 +204,14 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
         self.__prev_battery_readings = []
         if not isinstance(charging_locations, list):
             self.charging_locations = charging_locations
+        self.operational_speed = operational_speed
 
     def reset(self):
         pass
     
     def terminate_agent(self):
         self.end_comms_server()
+    
         
         
 #ToDo: Edit this to coordinate clocks with other agents. Maybe current agent shouldn't move until timestep is
@@ -230,61 +222,58 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
         '''
         #Before agent executes action, maybe it should coordinate with other agents
         if action[0] == 'move':
-            #need to implement this, first have agent coordinate with others to check if they are intending to move to current
-            #grid location
-#            if action[1] in other_agent_positions: 
-#                #this simulates a lower-level collision avoidence agent instructing 
-#                #robot to not crash into others
-#                return None
-            #update previous and current positions if the battery is not critical
-            if self.battery_capacity_simulator.get_current_capacity() <= 0.01:
-                #this simulates the agents battery failing
-                print("BATTERY FAILURE - AGENT WILL NOT MOVE ANY MORE")
-                #end the search prematurely since the agent can't move
-                self._end_search_prematurely = True
-                return None
-            else:
-                self.previous_pos_intended = self.current_pos_intended
-                self.current_pos_intended = action[1]
-                
-        elif action[0] == 'recharge':
-            #request battery simulator to recharge for this timestep
-            #could iterate ahead a few timesteps here to simulate recharge time
-            self.battery_capacity_simulator.recharge_to_percentage(self.battery_capacity_simulator.get_current_capacity() + 0.1)
-            
-        else:
-            raise Exception("Invalid action requested by {}: {}".format(self.agent_name, action))
-      
-    def update_battery_belief(self, action):
-        '''
-        Updates the estimated state ("belief") of the battery capacity
-        '''
-        if action[0] == 'recharge':
-            '''
-            Updates battery belief based on percept from simulator given that the battery has recharged
-            '''
-            if self.current_pos_intended in self.charging_locations:
-                self.battery_hmm.update_estimated_state('recharge', self.battery_capacity_simulator.get_current_capacity())
-            else:
-                print("{} ATTEMPTED TO RECHARGE BATTERY BUT IS NOT AT A RECHARGE LOCATION".format(self.agent_name))
-        
-        elif action[0] == 'move':
+            #update battery simulator and battery capacity belief vector as well as receive and update state based on other agent's broadcasts
             '''
             Updates battery belief based on percept from simulator given that the agent has moved.
             in reality, would instruct RAV to move to desired location and sample battery capacity percepts at fixed 
             intervals. Updates to the battery_capacity hmm would occur independently as each of these percepts is recorded
             simulated_sensor_readings = []
             '''
-            distance_to_travel = self.previous_pos_intended.distance_to(self.current_pos_intended)
-            no_seconds = distance_to_travel / self.operational_speed
-            no_updates = round(no_seconds)
-
-            
-        
-            for _ in range(no_updates):
-                self.battery_capacity_simulator.move_by_dist_at_speed(self.operational_speed)
-                self.__prev_battery_readings.append(self.battery_capacity_simulator.get_current_capacity())
-                self.battery_hmm.update_estimated_state('move', round(self.battery_capacity_simulator.get_current_capacity()))
+            #update previous and current positions if the battery is not critical
+            if self.battery_capacity_simulator.get_current_capacity() <= 0.01:
+                #this simulates the agents battery failing
+                print("\n-----------------BATTERY FAILURE - AGENT WILL NOT MOVE ANY MORE-----------------\n")
+                #end the search prematurely since the agent can't move
+                self._end_search_prematurely = True
+                return None
+            else:
+                intended_next_position = action[1]
+                distance_to_travel = self.current_pos_intended.distance_to(intended_next_position)
+                no_seconds = distance_to_travel / self.operational_speed
+                no_updates = round(no_seconds)
+                print("Number of battery updates to destination: {}".format(no_updates))
+                current_update = 0
+                while self.battery_capacity_simulator.get_current_capacity() > 0.01 and current_update < no_updates:
+                    self.battery_capacity_simulator.move_by_dist_at_speed(distance_to_travel * 5, self.operational_speed)
+                    self.__prev_battery_readings.append(self.battery_capacity_simulator.get_current_capacity())
+                    print("Battery State Estimated: {}".format(self.battery_estimated_state_model.get_expected_battery_capacity()))
+                    print("Battery State Actual: {}".format(self.battery_capacity_simulator.get_current_capacity()*10))
+                    self.battery_estimated_state_model.update_estimated_state('move', int(round(self.battery_capacity_simulator.get_current_capacity()*10)))
+                    #update sensor readings from other agents
+                    #in future might implement a coordination strategy
+                    
+                    self.coord_with_all_others()
+                    
+                    current_update += 1
+                #at this point the agent is at it's destination
+                self.previous_pos_intended = self.current_pos_intended
+                self.current_pos_intended = intended_next_position
+                
+        elif action[0] == 'recharge':
+            if self.current_pos_intended not in self.charging_locations:
+                print("{} CANNOT RECHARGE AS IT AT {}, WHICH IS NOT ONE OF THESE VALID CHARGING LOCATIONS: {}".format(self.agent_name, self.current_pos_intended, self.charging_locations))
+                return
+            else:
+                #request battery simulator to recharge for this timestep
+                #could iterate ahead a few timesteps here to simulate recharge time
+                #assume that recharge is until full
+                while self.battery_capacity_simulator.get_current_capacity() < 0.99:
+                    self.battery_capacity_simulator.increase_capacity(0.1)
+                    self.battery_estimated_state_model.update_estimated_state('recharge', round(self.battery_capacity_simulator.get_current_capacity()*10))
+                    self.coord_with_all_others()
+        else:
+            raise Exception("Invalid action requested by {}: {}".format(self.agent_name, action))
+             
                 
 
     def iterate_next_timestep(self, other_agent_positions = []):
@@ -292,13 +281,19 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
         At each discrete timestep, the agent chooses an action to take, executes it and then perceives the environment in which it is operating.
         The agent cannot move to a location which another agent is occupying (or is planning to occupy on the same timestep).
         '''
+        
+        #choose action to perform
+        #if action is move, then keep updating battery and receive coordinated values from other agents. Return once goal destination has been reached and allow agent 
+        #to record a sensor reading.
+        
+        
+        #if action is recharge, then keep recharging until full. Return once battery is fully recharged.
+        
+        
         #choose an action to perform, sending it to the robot to perform it
         self.actuate()
         #perceive the new state of the environment using the agents sensor(s)
         self.perceive()
-        
-        #first update the battery belief state, which is independent of the source locations belief state
-        self.update_battery_belief(self.current_pos_intended)
 
         #record the sensor measurement in a file
         self.record_sensor_measurement()
@@ -306,10 +301,8 @@ class MultipleSourceDetectingGridAgentWithBattery(MultipleSourceDetectingGridAge
         self.update_belief(self.latest_observation)
         
         #coordinate with other agents if possible
-        #in future implement a coordination strategy
-        for other_active_agent in self.other_active_agents:
-            if self.can_coord_with_other(other_active_agent, self.comms_radius):
-                self.coord_with_other(other_active_agent)
+        #in future implement a coordination strategy since this may be costly in terms of time and bandwidth
+        self.coord_with_all_others()
 
 
 
