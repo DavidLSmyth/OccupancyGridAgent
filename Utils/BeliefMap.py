@@ -694,9 +694,29 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
 if __name__ == "__main__":
     
     #%%
+    test_grid = UE4Grid(1,1,Vector3r(0,0), 2, 1)
+    test_grid.get_grid_points()
    
+    fpr = 0.3
+    fnr = 0.4
+    unif_prior = generate_uniform_prior(test_grid,1)
+
+    test_map = SingleSourceBinaryBeliefMap(test_grid, np.array([0.16, 0.16, 0.16, 0.16, 0.16, 0.1, 0.1]), fpr, fnr)
+    print(test_map.get_belief_map_components())
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(0, 0, 0), 1, 1, 1234, 'agent1'))
+    print('\n\n')
+    print(test_map.get_belief_map_components()) 
     
+    #%%
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(0, 0, 0), 1, 1, 1234, 'agent1'))
+    print('\n\n')
+    print(test_map.get_belief_map_components()) 
+    #%%
     
+    test_map.update_from_observation(BinaryAgentObservation(Vector3r(0, 1, 0), 0, 1, 1234, 'agent1'))
+    print('\n\n')
+    print(test_map.get_belief_map_components()) 
+    #%%
     #%%
     test_grid_loc = Vector3r(10,20)
     test_grid_loc1 = Vector3r(float(10.0),float(20.0))
