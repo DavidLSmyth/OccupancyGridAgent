@@ -1,0 +1,22 @@
+ETTDPos: 175.847
+ETTDThreePos: 157.4918460534899
+ETTDTwoPos: 206.05504019789734
+ETTDOnePos: 199.4765100671141
+ETTDZeroPos: 196.31578947368422
+SDTTD: 42.7799204183458
+SDThreePos: 42.82366602556723
+SDTwoPos: 21.05745154493627
+SDOnePos: 19.99247640120111
+SDZeroPos: 21.745060253523395
+ConfusionMatrix(rows=NoGuesses,Col=NoCorrectGuesses): [[  19    0    0    0]
+ [   0  298    0    0]
+ [   0   32 1585    0]
+ [   0    1  255 2810]]
+ConfusionMatrixNormalized(rows=NoGuesses,Col=NoCorrectGuesses): [[3.80e-03 0.00e+00 0.00e+00 0.00e+00]
+ [0.00e+00 5.96e-02 0.00e+00 0.00e+00]
+ [0.00e+00 6.40e-03 3.17e-01 0.00e+00]
+ [0.00e+00 2.00e-04 5.10e-02 5.62e-01]]
+ConfusionMatrixNormalizedLatex(rows=NoGuesses,Col=NoCorrectGuesses): 0.0038 & 0. & 0. & 0.
+0. & 0.0596 & 0. & 0.
+0. & 0.0064 & 0.317 & 0.
+0.00e+00 & 2.00e-04 & 5.10e-02 & 5.62e-01

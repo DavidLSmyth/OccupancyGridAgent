@@ -1,0 +1,19 @@
+ETTD: 315.0082
+ETTDPos: 309.4136748227761
+ETTDNeg: 354.0271132376395
+Var TTD: 19710.87533276
+Var TTDPos: 20571.419314485618
+Var TTDNeg: 11968.259232974417
+SD TTD: 140.395424899674
+SD TTDPos: 143.42740084964802
+SD TTDNeg: 109.399539455038
+NoRejections: 627
+ProportionRejections: 0.1254
+NumberIncorrectIdentifications: 183
+PropIncorrectIdentifications: 0.0366
+ProportionBothAgentsDontAgreeTimeStep: 0.004
+ProportionBothAgentsDontAgreeConcludedLocation: 0.0014
+ConfusionMatrixNormalizedLatex(rows=NoGuesses,Col=NoCorrectGuesses): 0.1254 & 0. & 0. & 0.
+0.0366 & 0.838 & 0. & 0.
+0. & 0. & 0. & 0.
+0. & 0. & 0. & 0.

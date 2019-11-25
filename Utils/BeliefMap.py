@@ -346,7 +346,7 @@ class BaseBeliefMap(ABC):
             raise Exception("{} is not in the belief map".format(grid_loc))
             
             
-    def save_visualisation(self, filepath, true_source_locations = []):
+    def save_visualisation(self, filepath, timestep, true_source_locations = []):
         '''Saves the visualisation as a png at the specified filepath'''
         fig = plt.figure()
         ax = fig.gca(projection='3d')
@@ -357,12 +357,12 @@ class BaseBeliefMap(ABC):
         #Y = list(map(lambda coord: coord.y_val, self.grid.get_grid_points()))
         #Z = [grid_comp.likelihood for grid_comp in self.get_belief_map_components()]
         #ax.set_zlim3d(0,Z.max()*1.02)
-        ax.set_zlim3d(0,16/self.grid.get_no_grid_points())
+        ax.set_zlim3d(0, 1)
         ax.plot_trisurf(X, Y, Z)
-        true_source_locations = [Vector3r(2,4), Vector3r(5,7)]
-
+        true_source_locations = [Vector3r(2,9), Vector3r(5,7)]
         ax.scatter(list(map(lambda coord: coord.x_val, true_source_locations)), list(map(lambda coord: coord.y_val, true_source_locations)),
                      [1/self.grid.get_no_grid_points() for _ in range(len(true_source_locations))], c = "red")
+        plt.title("Source location distribution at timestep {}".format(timestep))
         plt.savefig(filepath)
         plt.close(fig)        
     
@@ -694,18 +694,109 @@ def create_confidence_interval_map_from_observations(grid: UE4Grid, agent_observ
 if __name__ == "__main__":
     
     #%%
-    test_grid = UE4Grid(1,1,Vector3r(0,0), 2, 1)
-    test_grid.get_grid_points()
-   
-    fpr = 0.3
-    fnr = 0.4
-    unif_prior = generate_uniform_prior(test_grid,1)
 
-    test_map = SingleSourceBinaryBeliefMap(test_grid, np.array([0.16, 0.16, 0.16, 0.16, 0.16, 0.1, 0.1]), fpr, fnr)
-    print(test_map.get_belief_map_components())
-    test_map.update_from_observation(BinaryAgentObservation(Vector3r(0, 0, 0), 1, 1, 1234, 'agent1'))
+    test_grid = UE4Grid(1,1,Vector3r(0,0), 9, 9)
+
+    fpr = 0.4
+    fnr = 0.4
+    unif_prior = generate_uniform_prior(test_grid,0.5)
+    
+    test_map = MultipleSourceBinaryBeliefMap(test_grid, unif_prior, fpr, fnr)
+    #print(test_map.get_belief_map_components())
+
+    #test_map.show_visualisation()
+    print(test_map.current_belief_vector.get_prob_in_grid())
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 0)
+    
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,4, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,3, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,2, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,1, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,0, 0), 1)
+    
+    test_map.current_belief_vector.update(Vector3r(8,9, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,8, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,7, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,6, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,5, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,4, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(8,3, 0), 1)
+    
+    
+    print(test_map.current_belief_vector.get_prob_in_grid())
+    test_map.current_belief_vector.update(Vector3r(8,8, 0), 0)
+    print(test_map.current_belief_vector.get_prob_in_grid())
+
+    print(test_map.get_belief_map_components())    
+    
+    print(test_map.current_belief_vector.get_prob_in_grid())
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    print(test_map.current_belief_vector.get_prob_in_grid())
+    test_map.current_belief_vector.update(Vector3r(9,8, 0), 0)
+    print(test_map.current_belief_vector.get_prob_in_grid())
+    
+    i = 0
+    j = 0
+    counter = 0
+    while test_map.current_belief_vector.get_prob_in_grid() >=0.143 and test_map.current_belief_vector.get_prob_in_grid() <=0.89:
+    #for k in range(80):
+        print(test_map.current_belief_vector.get_prob_in_grid())
+        #if k%4==0 and k not in [4, 16, 44, 88, 92]:
+        test_map.current_belief_vector.update(Vector3r(i,j, 0), 0)
+        counter +=1
+        #else:
+        #    test_map.current_belief_vector.update(Vector3r(i,j, 0), 0)
+        i+=1
+        if i == 10:
+            j+=1
+            i = 0
+        if j == 10:
+            print("Exhausted")
+            j=0
+    print('i, j', i, j)
+    print(counter)
+    
+    
+    test_map.current_belief_vector.update(Vector3r(2,8, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,7, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,6, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,5, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,4, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,3, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,2, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(2,1, 0), 1)
+
+    test_map.current_belief_vector.update(Vector3r(3,8, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,7, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,6, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,5, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,4, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,3, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,2, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(3,1, 0), 1)
+    
+    test_map.current_belief_vector.update(Vector3r(5,8, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,7, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,6, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,5, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,4, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,5, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,2, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(5,1, 0), 1)
+
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    test_map.current_belief_vector.update(Vector3r(9,9, 0), 1)
+    
+
+    
+    print(test_map.current_belief_vector.get_prob_in_grid())
     print('\n\n')
-    print(test_map.get_belief_map_components()) 
+    #print(test_map.get_belief_map_components()) 
     
     #%%
     test_map.update_from_observation(BinaryAgentObservation(Vector3r(0, 0, 0), 1, 1, 1234, 'agent1'))

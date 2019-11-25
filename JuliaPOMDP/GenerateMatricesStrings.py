@@ -90,7 +90,7 @@ def generate_o(no_states):
 ######################Generate reward matrix string######################
     #%%
 def generate_r_matrix_row(no_states, current_state):
-    return '-1 '*current_state + ('100 ' if current_state != no_states else '-1 ') + '-1 '*(no_states - current_state - 1) + ';'
+    return '-1 '*current_state + ('100 ' if current_state != no_states else '') + '-1 '*(no_states - current_state - 1) + ';'
     
 def generate_r_matrix(no_states):
     '''
@@ -109,7 +109,7 @@ def generate_r_matrix(no_states):
 #%%
 
 #5x6 example
-no_states = 26
+no_states = 101
 with open('D:/OccupancyGrid/JuliaPOMDP/julia_t_o_matrices.txt', 'w') as f_out:
     f_out.write(generate_deteministic_t(no_states) + generate_o(no_states) + generate_r_matrix(no_states))
 

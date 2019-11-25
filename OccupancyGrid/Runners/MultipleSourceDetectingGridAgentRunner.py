@@ -31,7 +31,7 @@ from OccupancyGrid.Agents.DerivedOccupancyGridAgent import MultipleSourceDetecti
 from Utils.UE4Grid import UE4Grid
 from Utils.Vector3r import Vector3r
 from Utils.ActionSelection import EpsilonGreedyActionSelection, TSPActionSelection, TSPNNActionSelection, GreedyActionSelection, SaccadicActionSelection
-from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser
+from Analysis.BasicAgentAnalysis import SimpleAgentAnalyser, _generate_agent_heat_map_from_bel_map
 from Utils.SensorSimulators import FalsePosFalseNegBinarySensorSimulator, BinarySensorParameters
 from Utils.Prior import generate_gaussian_prior, generate_uniform_prior, generate_and_save_prior_fig
 from Utils.ProgressBar import progress_bar
@@ -106,22 +106,31 @@ def main():
     print("The sources were at locations {}".format(source_locations))
     print("The agent detected the following locations: {}".format(located_sources))
     #print("\nAgent1 state: \n", agent1.current_belief_map.current_belief_vector.get_estimated_state())
-    sys.exit(0)
-    
-    #run_t_timesteps([agent1, agent2], 60)
-    
-    
-    #agent3.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent3BelMapPrior.png")
+    #sys.exit(0)
 
-    max_timesteps = get_max_simulation_steps_from_config()
-    print("Running with max {} timesteps".format(max_timesteps))
-    no_timesteps_to_discovery = run_t_timesteps([agent3], max_timesteps, threshold)
-    no_timesteps_to_discovery = max_timesteps if not no_timesteps_to_discovery else no_timesteps_to_discovery
+#    
+#    print(agent1.current_belief_map.get_belief_map_components())
+#    print("\n\nSaving visualisations")
+#    agent1.current_belief_map.save_visualisation("D:\\OccupancyGrid\\Visualisations\\Agent1BelMap.png", self.timestep)
+#    #agent2.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent2BelMap.png")
+#    import matplotlib.pyplot as plt
+#    from mpl_toolkits.mplot3d import Axes3D
+#    fig = plt.figure()
+#    ax = fig.gca(projection='3d')
+#    ax.scatter([2], [9], [0], cmap='red')
+#    ax.scatter([5], [7], [0], cmap='red')
+#    plt.xlim(0, 10)
+#    plt.ylim(0,10)
+#    ax.set_zlim3d(0,0.5)
+#    plt.title("True locations of sources of evidence")    
+#    
     
-    print("\n\nSaving visualisations")
-    #agent1.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent1BelMap.png")
-    #agent2.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent2BelMap.png")
-
-
+    
+    
+    
+    
 if __name__ == '__main__':
+    t1 = time.time()
     main()
+    t2 = time.time()
+    print("Search took {} seconds".format(t2 - t1))

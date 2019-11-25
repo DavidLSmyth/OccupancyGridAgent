@@ -57,18 +57,23 @@ class AgentObservationFileReader:
         except Exception as e:
             raise e
             
-    def get_agent_observations_from_file_raw(self, timestep = None):
+    def get_agent_observations_from_file_raw(self, start_timestep = None, end_timestep = None):
         '''
-        Returns all observations from file associated with agent as a string. If timestep is provided then returns all observations before timestep
+        Returns all observations from file associated with agent as a string. If start and end timesteps are provided then returns all observations in between inclusive
         '''
         self.file_handle.seek(0)
-        if not timestep:
+        if not start_timestep and not end_timestep:
             return self.file_handle.readlines()
-        else:
+        
+        elif start_timestep and end_timestep:
             all_lines = self.file_handle.readlines()
             #print([line.split(',')[4] for line in all_lines])
-            return list(filter(lambda line: line.split(',')[4] != 'timestep' and int(line.split(',')[4]) <= timestep, all_lines))
+            return list(filter(lambda line: line.split(',')[4] != 'timestep' and int(line.split(',')[4]) <= end_timestep and int(line.split(',')[4]) >= start_timestep, all_lines))
         
+        elif start_timestep:
+            all_lines = self.file_handle.readlines()
+            #print([line.split(',')[4] for line in all_lines])
+            return list(filter(lambda line: line.split(',')[4] != 'timestep' and int(line.split(',')[4]) >= start_timestep, all_lines))
 #            reader = csv.reader(self.file_handle)
 #            #header = next(reader)
 #            #read the header and then throw it away

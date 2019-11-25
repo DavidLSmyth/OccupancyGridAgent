@@ -89,6 +89,8 @@ class SimpleGridAgent(BaseGridAgent):
         #record the sensor measurement in a file
         self.record_sensor_measurement()
         
+        #print("{} made observation {}".format(self.agent_name, self.latest_observation))
+        
         #update the agents belief
         self.update_belief(self.latest_observation)
         
@@ -109,11 +111,17 @@ class SimpleGridAgent(BaseGridAgent):
     def coord_with_other(self, other_active_agent):
         '''Requests observations from other active agents and updates this agents belief with the observations 
         received from other agents'''
-        #request observations from other agents
-        other_agent_observations = self.request_other_agent_observations(other_active_agent)
-        #update current agent belief based on other agents belief
-        for other_agent_observation in other_agent_observations:
-            self.update_belief(other_agent_observation)
+        #request observations from other agents from the last observation made onwards
+        #This ensures that repeat observations are not made
+        #print("{} requesting observations from {} from timestep ".format(self.agent_name, other_active_agent), str(self.update_dict[other_active_agent]), "onwards")
+        other_agent_observations = self.request_other_agent_observations(other_active_agent, self.update_dict[other_active_agent])
+        if other_agent_observations :
+            #print("{} recieved observations {} from {}".format(self.agent_name, other_agent_observations, other_active_agent))
+            #update the dict to the most recent observtion gathered from the other agent
+            self.update_dict[other_active_agent] = max(list(map(lambda x: x.timestep, other_agent_observations)))
+            #update current agent belief based on other agents belief
+            for other_agent_observation in other_agent_observations:
+                self.update_belief(other_agent_observation)
 
     def find_source(self) -> BeliefMapComponent:
         '''
@@ -138,13 +146,13 @@ class SimpleGridAgent(BaseGridAgent):
             
             #this actuates, perceives, updates belief map in one step
             self.iterate_next_timestep()
-            if self.timestep % 1 == 0:
-                print("Timestep: {}, Location explored: {}".format(self.timestep, self.current_pos_intended))
-                #self.current_belief_map.save_visualisation("D:/OccupancyGrid/Data/BeliefMapData/BeliefEvolutionImages/img{:03.0f}.png".format(self.timestep))
+            #if self.timestep % 1 == 0:
+                #print("Timestep: {}, Location explored: {}".format(self.timestep, self.current_pos_intended))
+#                self.current_belief_map.save_visualisation("D:/OccupancyGrid/Data/BeliefMapData/BeliefEvolutionImages/img{:03.0f}.png".format(self.timestep), self.timestep)
                 
         #return the most likely component of the belief map. This could be the component that represents the source is not present at all
-        print(self.current_belief_map.current_belief_vector.get_estimated_state())
-        print("source located at {}".format(self.current_belief_map.get_ith_most_likely_component(1).grid_loc))
+        #print(self.current_belief_map.current_belief_vector.get_estimated_state())
+        #print("source located at {}".format(self.current_belief_map.get_ith_most_likely_component(1).grid_loc))
         #return self.current_belief_map.get_most_likely_component()
         return self.current_belief_map.get_ith_most_likely_component(1)
         
@@ -176,8 +184,9 @@ class MultipleSourceDetectingGridAgent(SimpleGridAgent):
             #check if the source is deemed to not be present at all
             #if so, break the loop
             #This is bad practice - try and fix in future
-            print("next_source: ", next_source)
+            #print("next_source: ", next_source)
             if next_source.grid_loc == Vector3r(-1, -1):
+                self.located_sources.append(next_source)
                 break
             #given the next located source, append it to the list of located sources and then 
             #modify the belief vector to set the probability of subsequent sources to be found at

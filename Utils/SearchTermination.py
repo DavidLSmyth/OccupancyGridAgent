@@ -183,9 +183,12 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         #self.prior = prior
         #self.prior_belief_source_present = prior[:-1].sum()
         #self.prior_belief_source_not_present = 1 - self.prior_belief_source_present 
+        self.prior_likelihood_ratio = (1-prior_belief_present)/prior_belief_present
         self.prior_log_difference = math.log(1-prior_belief_present) - math.log(prior_belief_present)
-        print("prior_belief_present: {}".format(prior_belief_present))
+        print("SPRT prior_belief_present: {}".format(prior_belief_present))
         print("self.prior_log_difference: {}".format(self.prior_log_difference))
+        self.t_one_error_rate = probability_of_falsely_rejecting_source_is_present_given_source_is_present
+        self.t_two_error_rate = probability_of_falsely_accepting_source_is_present_given_source_is_not_present
         
     def _should_end_search(self, current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
         return self.accept_source_in_grid(current_belief_source_present) or self.accept_source_not_in_grid(current_belief_source_present)
@@ -200,6 +203,11 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         assert 0 < current_belief_source_present < 1
         return math.log(current_belief_source_present) - math.log(1-current_belief_source_present) + self.prior_log_difference
     
+    def get_likelihood_ratio(self,  current_belief_source_present: 'The belief at the current time that the source is present, given all evidence up to the current time'):
+        assert 0 < current_belief_source_present < 1
+        return (current_belief_source_present/(1-current_belief_source_present)) 
+    
+    
     def get_critical_region(self):
         '''
         Returns the critical region in which there is not enough evidence to accept or reject the null hypothesis.
@@ -213,41 +221,85 @@ class SequentialProbRatioTest(SingleSourceSearchTermination):
         '''
         plt.clf()
         point_range = list(range(1,100))
-        plt.plot([i/point_range[-1] for i in point_range], [self.get_log_likelihood_ratio(i/100) for i in point_range], label = 'Varying belief whether source present')
-        plt.plot([i/point_range[-1] for i in point_range], [self.upper_bound for i in point_range], label = 'Values that exceed accept source not present')
-        plt.plot([i/point_range[-1] for i in point_range], [self.lower_bound for i in point_range], label = 'Values that are lower accept source present')
-        points_to_fill_between = list(filter(lambda point: self.lower_bound <= self.get_log_likelihood_ratio(point/100), point_range))
+        plt.plot([i/point_range[-1] for i in point_range], [self.get_likelihood_ratio(i/100) for i in point_range], label = 'Varying belief whether source present')
+        plt.plot([i/point_range[-1] for i in point_range], [math.e**(self.upper_bound) for i in point_range], label = 'Values that exceed accept source not present')
+        plt.plot([i/point_range[-1] for i in point_range], [math.e**(self.lower_bound) for i in point_range], label = 'Values that are lower accept source present')
+        points_to_fill_between_lower = list(filter(lambda point: math.e**(self.lower_bound) <= self.get_likelihood_ratio(point/100), point_range))
         
-        points_to_fill_between = list(filter(lambda point: self.upper_bound >= self.get_log_likelihood_ratio(point/100), points_to_fill_between))
+        points_to_fill_between_upper = list(filter(lambda point: math.e**(self.upper_bound) >= self.get_likelihood_ratio(point/100), point_range))
         
-        plt.fill_between([point/point_range[-1] for point in points_to_fill_between], [self.lower_bound for _ in points_to_fill_between], [self.upper_bound for _ in points_to_fill_between], alpha = 0.3)
-        plt.xlabel("Agent belief source is present")
+        points_to_fill_between = list(filter(lambda point: point in points_to_fill_between_lower and point in points_to_fill_between_upper, point_range))
+        plt.fill_between([point/point_range[-1] for point in points_to_fill_between], [math.e**(self.lower_bound) for _ in points_to_fill_between], [math.e**self.upper_bound for _ in points_to_fill_between], alpha = 0.3)
+ 
+        plt.xlabel("Agent belief that target is present in the search region")
         plt.ylabel("Log-likelihood ratio of agent belief given source is present / agent belief given source is not present")
         plt.legend()
         
+        
+    def plot_log_likelihood_critical_region(self):
+        '''
+        Plots the cutoffs with varying belief in source presence
+        '''
+        plt.clf()
+        point_range = list(range(1,100))
+        
+        points_to_fill_between_lower = list(filter(lambda point: self.lower_bound <= self.get_log_likelihood_ratio(point/100), point_range))
+        points_to_fill_between_upper = list(filter(lambda point: self.upper_bound >= self.get_log_likelihood_ratio(point/100), point_range))
+        
+        plt.plot([i/point_range[-1] for i in point_range], [self.get_log_likelihood_ratio(i/100) for i in point_range], label = r'Log-likelihood ratio of $\frac{P(e_{1:t} | H_0)}{P(e_{1:t} | H_1)}$ at time t')
+        plt.plot([i/point_range[-1] for i in point_range], [self.upper_bound for i in point_range], label = r'log(A) = '+"{:.2f}".format(self.upper_bound), color = 'blue')
+        plt.plot([i/point_range[-1] for i in point_range], [self.lower_bound for i in point_range], label = r'log(B) = '+"{:.2f}".format(self.lower_bound), color = 'red')
+        
+        
+        
+        points_to_fill_between = list(filter(lambda point: point in points_to_fill_between_lower and point in points_to_fill_between_upper, point_range))
+        #plt.fill_between([point/point_range[-1] for point in points_to_fill_between], [self.lower_bound for _ in points_to_fill_between], [self.upper_bound for _ in points_to_fill_between], alpha = 0.3)
+
+        plt.fill_between([point/point_range[-1] for point in point_range], [self.lower_bound for _ in point_range], [self.upper_bound for _ in point_range], alpha = 0.1, color = 'green')
+
+        lower_points = list(filter(lambda point: self.lower_bound > self.get_log_likelihood_ratio(point/100), point_range))
+        upper_points = list(filter(lambda point: self.upper_bound <= self.get_log_likelihood_ratio(point/100), point_range))
+        plt.fill_between([point/point_range[-1] for point in point_range], [-5 for _ in point_range], [self.lower_bound for _ in point_range], alpha = 0.05, color = 'red')
+        plt.fill_between([point/point_range[-1] for point in point_range], [self.upper_bound for _ in point_range], [5 for _ in point_range], alpha = 0.05, color = 'red')
+       # plt.fill_between([point/point_range[-1] for point in points_to_fill_between_lower], [self.lower_bound for _ in points_to_fill_between], [self.upper_bound for _ in points_to_fill_between], alpha = 0.3, colour = 'red')
+        
+       #change the colour of the line for log likelihoods that do not exceed a certain point
+        #lower_points = list(filter(lambda point: self.lower_bound > self.get_log_likelihood_ratio(point/100), point_range))
+        #upper_points = list(filter(lambda point: self.upper_bound <= self.get_log_likelihood_ratio(point/100), point_range))
+        #plt.plot([i/point_range[-1] for i in lower_points], [self.get_log_likelihood_ratio(i/100) for i in lower_points], color = 'red')
+        #plt.plot([i/point_range[-1] for i in upper_points], [self.get_log_likelihood_ratio(i/100) for i in upper_points], color = 'green')
+
+        plt.xlabel("Agent belief that target is present in the search region")
+        plt.ylabel(r"Log-likelihood ratio of $\frac{P(e_{1:t} | H_0)}{P(e_{1:t} | H_1)}$")
+        plt.title(r'Plot of regions for which $H_0$ is accepted, $H_1$ is accepted (red) '
+                  '\n'
+                  r' or neither is accepted and another sample is taken (green)')
+        plt.legend()
+        
+        
     def plot_lower_and_upper_decision_boundary_fixed_type1_error(self, type1_error_rate):
-        type2_error_rates = [i/100 for i in range(1,100)]
+        type2_error_rates = [i/200 for i in range(1,100)]
         lower_bounds = [math.log(type2_error_rate/(1-type1_error_rate)) for type2_error_rate in type2_error_rates]
         upper_bounds = [math.log((1-type2_error_rate)/type1_error_rate) for type2_error_rate in type2_error_rates]
         plt.clf()
-        plt.plot([i for i in type2_error_rates], [lower_bound for lower_bound in lower_bounds], label = 'Lower bound varying with type2 error rate')
-        plt.plot([i for i in type2_error_rates], [upper_bound for upper_bound in upper_bounds], label = 'Upper bound varying with type2 error rate')
-        plt.title("Varying lower bound with type 1 error rate fixed at {}".format(type1_error_rate))
-        plt.xlabel("Type2 error rate")
-        plt.ylabel("Log-likelihood upper and lower decision thresholds")
+        plt.plot([i for i in type2_error_rates], [lower_bound for lower_bound in lower_bounds], label = r'log(B) = log($\frac{\beta}{1-\alpha}$)')
+        plt.plot([i for i in type2_error_rates], [upper_bound for upper_bound in upper_bounds], label = r'log(A) = log($\frac{1-\beta}{\alpha}$)')
+        plt.title(r"Decision boundaries for varying $\beta$ error rate with $\alpha$ fixed at {}".format(type1_error_rate))
+        plt.xlabel(r"$\beta$")
+        plt.ylabel("")
         plt.legend()
 
         
     def plot_lower_and_upper_decision_boundary_fixed_type2_error(self, type2_error_rate):
-        type1_error_rates = [i/100 for i in range(1,100)]
+        type1_error_rates = [i/200 for i in range(1,100)]
         lower_bounds = [math.log(type2_error_rate/(1-type1_error_rate)) for type1_error_rate in type1_error_rates]
         upper_bounds = [math.log((1-type2_error_rate)/type1_error_rate) for type1_error_rate in type1_error_rates]
         plt.clf()
-        plt.plot([i for i in type1_error_rates], [lower_bound for lower_bound in lower_bounds], label = 'Lower bound varying with type1 error rate')
-        plt.plot([i for i in type1_error_rates], [upper_bound for upper_bound in upper_bounds], label = 'Upper bound varying with type1 error rate')
-        plt.title("Varying lower bound with type 2 error rate fixed at {}".format(type2_error_rate))
-        plt.xlabel("Type1 error rate")
-        plt.ylabel("Log-likelihood upper and lower decision thresholds")
+        plt.plot([i for i in type1_error_rates], [lower_bound for lower_bound in lower_bounds], label = r'log(B) = log($\frac{\beta}{1-\alpha}$)')
+        plt.plot([i for i in type1_error_rates], [upper_bound for upper_bound in upper_bounds], label = r'log(A) = log($\frac{1-\beta}{\alpha}$)')
+        plt.title(r"Decision boundaries for varying $\alpha$ error rate with $\beta$ fixed at {}".format(type2_error_rate))
+        plt.xlabel(r"$\alpha$")
+        plt.ylabel("")
         plt.legend()
 
     
@@ -345,11 +397,16 @@ def calulate_probability_of_evidence(sequence, locations, possible_locations, fp
 #%%
 if __name__ == '__main__':
     #%%
-    sprt = SequentialProbRatioTest(0.8, 0.2, 0.1)
+    sprt = SequentialProbRatioTest(0.5, 0.1, 0.15)
     sprt.plot_critical_region()    
-    sprt.plot_lower_and_upper_decision_boundary_fixed_type2_error(0.1)
+    sprt.plot_lower_and_upper_decision_boundary_fixed_type2_error(0.15)
     sprt.plot_lower_and_upper_decision_boundary_fixed_type1_error(0.1)
     sprt.plot_critical_region()
+    math.exp(sprt.lower_bound)
+    math.exp(sprt.upper_bound)
+    
+    sprt._should_end_search(0.89)
+    sprt._should_end_search(0.9)
     #%%
     #3X3 grid
     no_states = 10
@@ -598,6 +655,202 @@ if __name__ == '__main__':
     print(likelihood)
     print(calulate_probability_of_evidence(sequence, locations, test_grid.get_grid_points(), fpr, fnr))
     print(calulate_probability_of_evidence(sequence, more_likely_locations, test_grid.get_grid_points(), fpr, fnr))
+
+
+
+    #%%
+    ####################
+    # Plots for thesis #
+    ####################
+    
+    #%%
+    
+    B = lambda alpha, beta: beta/(1-alpha)
+    A = lambda alpha, beta: (1-beta)/alpha
+    
+    
+    ########################
+    # 2-D plots of A and B #
+    ########################
+    
+    #This plots A as a function of beta 
+#    plt.clf()
+    plt.figure()
+    x_vals = [i/100 for i in range(1,100)]
+    
+    #for fixed alpha, plot A as a function of beta
+    for alpha in [_/10 for _ in range(1,10)]:
+        plt.plot(x_vals, [A(alpha, beta) for beta in x_vals], label = r'$\alpha$ = '+str(alpha))
+    plt.xlabel(r'$\beta$')
+    plt.ylabel("A")
+    plt.title(r'A as a function of $\beta$ for fixed $\alpha$')
+    plt.legend()
+
+#%%
+    #plt.clf()
+    plt.figure()
+    #This plots A as a function of alpha
+    #for fixed beta, plot A as a function of alpha
+    for beta in [_/10 for _ in range(1,10)]:
+        plt.plot(x_vals, [A(alpha, beta) for alpha in x_vals], label =r'$\beta$ = '+str(beta))
+    plt.xlabel(r'$\alpha$')
+    plt.ylabel("A")
+    plt.title(r'A as a function of $\alpha$ for fixed $\beta$')
+    plt.legend()
+    
+    #%%
+    #This plots B as a function of beta
+    
+    x_vals = [i/100 for i in range(1,100)]
+    
+    plt.figure()
+    #for fixed alpha, plot A as a function of beta
+    for alpha in [_/10 for _ in range(1,10)]:
+        plt.plot(x_vals, [B(alpha, beta) for beta in x_vals], label = r'$\alpha$ = '+str(alpha))
+    plt.xlabel(r'$\beta$')
+    plt.ylabel("B")
+    plt.title(r'B as a function of $\beta$ for fixed $\alpha$')
+    plt.legend()
+    
+    #%%
+    #This plots B as a function of alpha
+    
+    x_vals = [i/100 for i in range(1,100)]
+    plt.figure()
+    for beta in [_/10 for _ in range(1,10)]:
+        plt.plot(x_vals, [B(alpha, beta) for alpha in x_vals], label = r'$\beta$ = '+str(beta))
+    plt.xlabel(r'$\alpha$')
+    plt.ylabel("B")
+    plt.title(r'B as a function of $\alpha$ for fixed $\beta$')
+    plt.legend()
+    
+    #%%
+    #This plots both A and B as a function of alpha
+    plt.clf()
+    plt.plot()
+
+    #for fixed beta, plot A as a function of alpha
+    for beta in [_/10 for _ in range(1,10)]:
+        plt.plot(x_vals, [A(alpha, beta) for alpha in x_vals], label =r'$\beta$ = '+str(beta))
+        plt.plot(x_vals, [B(alpha, beta) for alpha in x_vals])
+    plt.xlabel(r'$\alpha$')
+    plt.ylabel("A and B")
+    plt.title(r'A and B as a function of $\alpha$ for fixed $\beta$')
+    plt.legend()
+    
+    #%%
+    #This plots both A and B as a function of beta
+    #seems to be symmetric as alpha and beta decrease
+    plt.figure()
+    x_vals = [_/100 for _ in range(50)]
+    for alpha in [_/10 for _ in range(1,10)]:
+    #alpha = 0.1
+        plt.plot(x_vals, [A(alpha, beta) for beta in x_vals], label =r'$\A$ = '+str(alpha), color = 'blue')
+        plt.plot(x_vals, [B(alpha, beta) for beta in x_vals], label =r'$\B$ = '+str(alpha), color = 'red')
+    plt.xlabel(r'$\beta$')
+    plt.ylabel("A and B")
+    plt.title(r'A and B as a function of $\beta$ for fixed $\alpha$='+str(alpha))
+    plt.legend()
+    
+    
+    #%%
+    
+    
+    
+    
+    
+    #%%
+    #############
+    # 3-D plots #
+    #############
+    
+    # 3-D plot of how A varies with alpha and beta
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    no_vals = 20
+    
+    alphas = np.array([np.linspace(0.1,1,no_vals) for _ in range(no_vals)])
+    betas = np.array([np.linspace(0.1,1,no_vals) for _ in range(no_vals)]).transpose()
+    
+    x,y = np.meshgrid(np.linspace(0.1,1,10), np.linspace(0.1,1,no_vals))
+    A(x,y)
+    #beta is fixed 
+    z = np.array([A(alpha, beta) for alpha in np.linspace(0.1,1,no_vals) for beta in np.linspace(0.1,1,no_vals)]).reshape(no_vals, no_vals)
+    x.shape
+    y.shape
+    z.shape
+    ax.plot_wireframe(x,y, z)
+    ax.set_xlabel(r'$\alpha$')
+    ax.set_ylabel(r'$\beta$')
+    plt.title(r'A as a function of $\alpha$ and $\beta$')
+
+
+    #%%
+    
+    # 3-D plot of how B varies with alpha and beta
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    
+    alphas = np.array([np.linspace(0.1,1,no_vals) for _ in range(no_vals)])
+    betas = np.array([np.linspace(0.1,1,no_vals) for _ in range(no_vals)]).transpose()
+    
+    x,y = np.meshgrid(np.linspace(0.1,1,no_vals), np.linspace(0.1,1,no_vals))
+    #beta is fixed 
+    z = np.array([B(alpha, beta) for alpha in np.linspace(0.1,1,no_vals) for beta in np.linspace(0.1,1,no_vals)]).reshape(no_vals, no_vals)
+    x.shape
+    y.shape
+    z.shape
+    ax.plot_wireframe(x,y, z)
+    ax.set_xlabel(r'$\alpha$')
+    ax.set_ylabel(r'$\beta$')
+    plt.title(r'B as a function of $\alpha$ and $\beta$')
+
+
+    #%%
+    
+    # 3-D plot of how A and B vary with alpha and beta
+    #This generates a plot in SearchTermination subsection
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    no_grid_points = 20
+    plot_xlim = 0.5
+    plot_ylim = 0.5
+    alphas = np.array([np.linspace(0,plot_xlim,no_grid_points) for _ in range(no_grid_points)])
+    betas = np.array([np.linspace(0,plot_ylim,no_grid_points) for _ in range(no_grid_points)]).transpose()
+    
+    x,y = np.meshgrid(np.linspace(0.0001,plot_xlim,no_grid_points), np.linspace(0.0001,plot_ylim,no_grid_points))
+    #beta is fixed 
+    B_vals = np.array([math.log(B(alpha, beta)) for alpha in np.linspace(0.0001,plot_xlim,no_grid_points) for beta in np.linspace(0.0001,plot_ylim,no_grid_points)]).reshape(no_grid_points, no_grid_points)
+    A_vals= np.array([math.log(A(alpha, beta)) for alpha in np.linspace(0.0001,plot_xlim,no_grid_points) for beta in np.linspace(0.0001,plot_ylim,no_grid_points)]).reshape(no_grid_points, no_grid_points)
+
+    ax.plot_wireframe(x,y, B_vals, color = 'red', alpha = 0.5, label = 'B')
+    ax.plot_wireframe(x,y, A_vals, color = 'blue', alpha = 0.5, label = 'A')
+    ax.set_xlabel(r'$\beta$')
+    ax.set_ylabel(r'$\alpha$')
+    ax.set_ylim((0, plot_ylim))
+    ax.set_xlim((0, plot_xlim))
+    plt.title(r'Plot of A=$\frac{1-\beta}{\alpha}$ and B=$\frac{\beta}{1-\alpha}$ as a function of $\alpha$ and $\beta$.')
+    plt.legend()
+
+    
+    #%%
+    #This creates the latex for the table on p.68 of my thesis
+    values = np.array([B(alpha/20, beta/20) for alpha in range(1,11) for beta in range(1,11)]).reshape(10,10)
+    for index, value in enumerate(values):
+        print(str((index+1)/20) + ' & '+ ' & '.join([str("{:.2f}").format(v) for v in value])+r" \\")
+
+    print(' & '.join([str(beta/20) for beta in range(1,11)]))
+
+
+    #%%
+
+    #This generates a plot in SearchTermination subsection
+    t = SequentialProbRatioTest(0.5, 0.1, 0.02)
+    t.plot_log_likelihood_critical_region()
+   # t.plot_critical_region()
+    t.plot_lower_and_upper_decision_boundary_fixed_type2_error(0.07)
 
 
 

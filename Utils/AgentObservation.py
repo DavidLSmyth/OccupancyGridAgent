@@ -67,7 +67,7 @@ class BinaryAgentObservation(_AgentObservationBase):
     A Decision-Making Framework for Control Strategies in Probabilistic Search'''
     def __new__(cls, grid_loc,binary_sensor_reading,timestep,timestamp,observer_name) -> '_AgentObservation':
         #does it make sense to just leave args in the constructor and let the return line handle an incorrect number of args
-        if binary_sensor_reading not in [0,1]:
+        if float(binary_sensor_reading) not in [float(0),float(1)]:
             raise Exception("Binary sensor reading not valid: {}".format(binary_sensor_reading))
         args = (grid_loc, binary_sensor_reading, timestep, timestamp, observer_name)
         return super().__new__(cls, *[d_type(value) if type(value) is not d_type else value for value, d_type in zip(args, _AgentObservationBase.__annotations__.values())])
@@ -116,7 +116,7 @@ class AgentObservations:
 import functools
     
 def _get_agent_observation_for_csv(grid_loc,reading,timestep,timestamp,observer_name):
-    return functools.reduce(lambda x, y: str(x)+str(y), [grid_loc.y_val,grid_loc.x_val,grid_loc.z_val,reading,timestep,timestamp,observer_name])
+    return functools.reduce(lambda x, y: str(x)+','+str(y), [grid_loc.y_val,grid_loc.x_val,grid_loc.z_val,reading,timestep,timestamp,observer_name])
      
 def get_agent_observation_for_csv(agent_observation: AgentObservation):
     '''Returns elements of agent state that are important for analysis that can be written to csv. Position, battery cap., total_dist_travelled, battery_consumed, occ_grid'''

@@ -211,6 +211,15 @@ class SaccadicActionSelection(GreedyActionSelection):
         return 'move', max_belief_loc.grid_loc
     
     
+class RandomActionSelection(BaseActionSelection):
+    
+    def __init__(self, grid: UE4Grid):
+        self.grid = grid
+    
+    def get_move(self, belief_map, current_grid_loc, explored_grid_locs) -> (str, Vector3r):
+        '''Every agent should have a get move method which will override this method'''
+        return 'move', random.choice(self.grid.get_grid_points())
+    
 class LookaheadActionSelection(BaseActionSelection):
     '''
     Returns the sequence of actions to take that will provide the best results (under the uncertainty of the model)

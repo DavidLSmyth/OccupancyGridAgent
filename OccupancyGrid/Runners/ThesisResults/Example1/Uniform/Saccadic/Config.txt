@@ -1,0 +1,15 @@
+[Default]
+NoAgents = 1
+GridSize = 10x10
+XSpacing = 1
+YSpacing = 1
+Prior = Gaussian around source location with [3,0], [0,3] covariance
+SensorFPR = 0.1
+SensorFNR = 0.15
+#A type 1 error occurs when a true null hypothesis is falsely rejected (i.e. accept the alternative). 
+Type1ErrorProb = 0.1
+#A type 2 error occurs when a false null hypothesis is falsely accepted (i.e. accept null).
+Type2ErrorProb = 0.15
+SearchStrategy = Saccadic
+
+

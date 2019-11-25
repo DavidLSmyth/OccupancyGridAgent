@@ -174,7 +174,7 @@ if __name__ == "__main__":
     ax.plot_trisurf(x, y, z)
     plt.savefig("C:\\Users\\13383861\\Downloads\\multi.png")
     import sys
-    sys.exit(0)
+    #sys.exit(0)
 
     #grid, initial_pos, move_from_bel_map_callable, height, epsilon, multirotor_client, agent_name, prior = {}
    # OccupancyGridAgent(grid, Vector3r(0,0), get_move_from_belief_map_epsilon_greedy, -12, 0.3, agent_name, other_active_agents).explore_t_timesteps(args.no_timesteps)

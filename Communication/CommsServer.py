@@ -41,11 +41,13 @@ class AgentCommunicatorServer:
             #and then initialise properly when request comes in
             self.obs_file_reader = None
             
-        def get(self, agent_name, timestep):
+        def get(self, agent_name, start_timestep, end_timestep):
             if not self.obs_file_reader:
                 self.obs_file_reader = AgentObservationFileReader(agent_name, 'Observations/'+agent_name + '.csv')
-                observations = self.obs_file_reader.get_agent_observations_from_file_raw(timestep = int(timestep))
-                print("read observations as {}".format(observations))
+                #print("start_timestep, end_timestep", start_timestep, end_timestep)
+                #print(type(end_timestep))
+            observations = self.obs_file_reader.get_agent_observations_from_file_raw(start_timestep = int(start_timestep), end_timestep = None if end_timestep == "None" else int(end_timestep))
+                #print("read observations as {}".format(observations))
             return observations
             #return "Will give you back observations from agent {} as far as timestep {}".format(agent_name, timestep)
             
@@ -77,7 +79,7 @@ class AgentCommunicatorServer:
         port = AgentCommunicatorServer.base_port + int(agent_name.split('agent')[1])
         self.app = Flask(__name__)
         self.api = Api(self.app)
-        self.api.add_resource(AgentCommunicatorServer._AgentObservationsRequest, '/get_observations/<agent_name>/<timestep>')
+        self.api.add_resource(AgentCommunicatorServer._AgentObservationsRequest, '/get_observations/<agent_name>/<start_timestep>/<end_timestep>')
         self.api.add_resource(AgentCommunicatorServer._ShutdownServer, '/shutdown')
         self.api.add_resource(AgentCommunicatorServer._Ping, '/ping')
         self.port = port

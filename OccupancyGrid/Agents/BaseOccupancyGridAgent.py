@@ -120,16 +120,20 @@ class BaseGridAgent:
         print("Configuring agent communications")
         self.comms_radius = comms_radius
         
-        self.comms_client = AgentCommunicatorClient()
-        print("Started communications client")
+        #self.comms_client = AgentCommunicatorClient()
+        #print("Started communications client")
         
-        self.check_comms_server_live()
+        #self.check_comms_server_live()
         
         self.others_coordinated_this_timestep = []
         
         #manages observations of this agent and other agents
         self.observation_manager = ObservationSetManager(self.agent_name)
         print("Initialized observation manager")
+        
+        #a dictionary of the last update from all other agents (can update only from most recent timestep onwards)
+        #this should probably record timestamps instead of timesteps but easier to just work with timestesp for simulation
+        self.update_dict = {other_active_agent:0 for other_active_agent in other_active_agents}
         
         #maybe should include possibility of multiple sensors?
         self.occupancy_sensor_simulator = occupancy_sensor_simulator
@@ -179,7 +183,7 @@ class BaseGridAgent:
               
     def check_comms_server_live(self):
         if not self.comms_client.check_server_running(self.agent_name):
-            inp = input("Server doesn't seem to be running, would you like to proceed without comms or try and connect again? (n) to try again (y) to proceed")
+            inp = input("Server for agent {} doesn't seem to be running, would you like to proceed without comms or try and connect again? (n) to try again (y) to proceed".format(self.agent_name))
             while inp not in ['y','n']:
                 inp = input("Server doesn't seem to be running, would you like to proceed without comms?")
             if inp == 'n':
@@ -330,12 +334,12 @@ class BaseGridAgent:
     def increment_timestep(self):
         self.timestep+=1
         
-    def request_other_agent_observations(self, other_agent_name):
+    def request_other_agent_observations(self, other_agent_name, start_timestep = 0, end_timestep = None):
         '''
         Requests other agent to send all observations that it has gathered and been sent up to the current point in time
         '''
         try:
-            return self.comms_client.get_observations_from(other_agent_name)
+            return self.comms_client.get_observations_from(other_agent_name, start_timestep, end_timestep)
         except Exception as e:
             #if there are comms problems, return an empty list and log the problem to stdout for now
             print("Could not communicate with agent {}".format(other_agent_name))
@@ -356,7 +360,7 @@ class BaseGridAgent:
         #check if any other ravs in comm radius. if so, return which ravs can be communicated with
         #assume communcications randomly drop with probability in proportion to range_m
         #for now 10% communication. This should probably go in a config file
-        return random.random() < 0.1
+        return random.random() <= 1
 
 #%%
     

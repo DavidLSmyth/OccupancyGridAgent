@@ -115,7 +115,7 @@ def main():
     print("The sources were at locations {}".format(source_locations))
     print("The agent detected the following locations: {}".format(located_sources))
     #print("\nAgent1 state: \n", agent1.current_belief_map.current_belief_vector.get_estimated_state())
-    sys.exit(0)
+    #sys.exit(0)
     
     #run_t_timesteps([agent1, agent2], 60)
     
@@ -128,7 +128,7 @@ def main():
     no_timesteps_to_discovery = max_timesteps if not no_timesteps_to_discovery else no_timesteps_to_discovery
     
     print("\n\nSaving visualisations")
-    #agent1.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent1BelMap.png")
+    agent1.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent1BelMap.png")
     #agent2.current_belief_map.save_visualisation("D:\\ReinforcementLearning\\DetectSourceAgent\\Visualisations\\Agent2BelMap.png")
 
 

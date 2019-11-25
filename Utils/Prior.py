@@ -59,12 +59,12 @@ def _generate_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance
     numpy_prior = np.append(list_of_grid_points, 1 - list_of_grid_points.sum())
     return numpy_prior
     
-def generate_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", initial_belief_sum = 0.5) -> "Tuple(np.array normed prior probs, prior_dict":
+def generate_gaussian_prior(grid: UE4Grid, means: "list of 2 means", covariance_matrix: "2x2 covariance matrix", initial_belief_sum) -> "Tuple(np.array normed prior probs, prior_dict":
     '''Given a 2d vector of means, 2X2 covariance matrix, returns a 2D gaussian prior'''
     return _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)
 
 
-def generate_uniform_prior(grid: UE4Grid, initial_belief_sum = 0.5, fixed_value = None):
+def generate_uniform_prior(grid: UE4Grid, initial_belief_sum, fixed_value = None):
     '''Generates a uniform prior which equates to delta/|grid|. The sum of each grid location prior is equal to initial_belief_sum. If fixed_value provided, 
     each location in the prior will have fixed_value as prior'''
     if fixed_value and 0<=fixed_value<=1:
@@ -79,14 +79,15 @@ def plot_prior(grid: UE4Grid, prior):
     x, y = np.mgrid[0:grid.get_no_points_x() * grid.get_lng_spacing():grid.get_lng_spacing(), 0:grid.get_no_points_y() * grid.get_lat_spacing():grid.get_lat_spacing()]
     ax = fig.gca(projection='3d')
     prior = prior[:-1]
-    z_lim = prior.max() * 1.02
+    z_lim = prior.max() * 1.5
     ax.set_zlim3d(0, z_lim)
     if prior.shape != (len(x),len(y)):
         prior = prior.reshape(len(x),len(y))
     ax.plot_wireframe(x, y, prior)
-    ax.set_xlabel("physical x-axis of grid")
-    ax.set_ylabel("physical y-axis of grid")
-    ax.set_zlabel("Initial prob. evidence present at grid location")
+    ax.set_xlabel("Physical x-axis of grid")
+    ax.set_ylabel("Physical y-axis of grid")
+    #ax.set_zlabel("Initial belief target is present at grid location")
+    plt.title("Initial belief distribution over the region of interest")
     return fig
     
 def generate_and_save_prior_fig(grid: UE4Grid, prior, file_path):
@@ -112,12 +113,13 @@ def is_valid_initial_dist(no_grid_points, initial_dist):
 if __name__ == '__main__':
 #%%
 
-    grid = UE4Grid(1, 1, Vector3r(0,0), 10, 10)
+    grid = UE4Grid(1, 1, Vector3r(0,0), 9, 9)
     grid.get_grid_points()
-    means = [1,3]
-    covariance_matrix = [[7.0, 0], [0, 15]]
+    means = [3,4]
+    covariance_matrix = [[3.0, 0], [0, 3]]
     initial_belief_sum = 0.5
     gaussian_prior = _generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum)
+    plot_prior(grid, gaussian_prior)
     assert is_valid_initial_dist(grid.get_no_grid_points(), gaussian_prior)
     
     prior = generate_gaussian_prior(grid, means, covariance_matrix, initial_belief_sum = 0.5)
